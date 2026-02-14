@@ -1,0 +1,336 @@
+{
+  "config": {
+    "earnings_limit": 4,
+    "history_limit": 30,
+    "income_freq": "yearly",
+    "income_limit": 4,
+    "interval": "1d",
+    "package_path": "/Users/mine/GitHub/yfinance-swift/swift/YFinanceKit",
+    "period": "1mo",
+    "symbols": [
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "TSLA",
+      "VOO",
+      "BTC-USD"
+    ]
+  },
+  "generated_at": "2026-02-13T20:32:09.353592+00:00",
+  "summary": {
+    "fail": 0,
+    "pass": 4,
+    "score": 100.0,
+    "skip": 2,
+    "total": 6,
+    "warn": 0
+  },
+  "symbols": [
+    {
+      "comparisons": {
+        "earnings_dates": {
+          "issues": [],
+          "metrics": {
+            "avg_eps_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_eps_rel_diff=0.0000"
+        },
+        "history": {
+          "issues": [],
+          "metrics": {
+            "avg_close_rel_diff": 0.0,
+            "overlap": 23,
+            "python_count": 23,
+            "swift_count": 23
+          },
+          "status": "pass",
+          "summary": "overlap=23 avg_close_rel_diff=0.0000"
+        },
+        "income_stmt": {
+          "issues": [],
+          "metrics": {
+            "avg_stmt_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_stmt_rel_diff=0.0000"
+        },
+        "quote": {
+          "issues": [],
+          "metrics": {
+            "fail_diffs": 0,
+            "warn_diffs": 0
+          },
+          "status": "pass",
+          "summary": "0 fail-level, 0 warn-level differences"
+        }
+      },
+      "status": "pass",
+      "swift_errors": [],
+      "swift_ok": true,
+      "symbol": "AAPL"
+    },
+    {
+      "comparisons": {
+        "earnings_dates": {
+          "issues": [],
+          "metrics": {
+            "avg_eps_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_eps_rel_diff=0.0000"
+        },
+        "history": {
+          "issues": [],
+          "metrics": {
+            "avg_close_rel_diff": 1.4921703839431436e-05,
+            "overlap": 23,
+            "python_count": 23,
+            "swift_count": 23
+          },
+          "status": "pass",
+          "summary": "overlap=23 avg_close_rel_diff=0.0000"
+        },
+        "income_stmt": {
+          "issues": [],
+          "metrics": {
+            "avg_stmt_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_stmt_rel_diff=0.0000"
+        },
+        "quote": {
+          "issues": [],
+          "metrics": {
+            "fail_diffs": 0,
+            "warn_diffs": 0
+          },
+          "status": "pass",
+          "summary": "0 fail-level, 0 warn-level differences"
+        }
+      },
+      "status": "pass",
+      "swift_errors": [],
+      "swift_ok": true,
+      "symbol": "MSFT"
+    },
+    {
+      "comparisons": {
+        "earnings_dates": {
+          "issues": [],
+          "metrics": {
+            "avg_eps_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_eps_rel_diff=0.0000"
+        },
+        "history": {
+          "issues": [],
+          "metrics": {
+            "avg_close_rel_diff": 4.795409528373947e-06,
+            "overlap": 23,
+            "python_count": 23,
+            "swift_count": 23
+          },
+          "status": "pass",
+          "summary": "overlap=23 avg_close_rel_diff=0.0000"
+        },
+        "income_stmt": {
+          "issues": [],
+          "metrics": {
+            "avg_stmt_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_stmt_rel_diff=0.0000"
+        },
+        "quote": {
+          "issues": [],
+          "metrics": {
+            "fail_diffs": 0,
+            "warn_diffs": 0
+          },
+          "status": "pass",
+          "summary": "0 fail-level, 0 warn-level differences"
+        }
+      },
+      "status": "pass",
+      "swift_errors": [],
+      "swift_ok": true,
+      "symbol": "NVDA"
+    },
+    {
+      "comparisons": {
+        "earnings_dates": {
+          "issues": [],
+          "metrics": {
+            "avg_eps_rel_diff": 0.0,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_eps_rel_diff=0.0000"
+        },
+        "history": {
+          "issues": [],
+          "metrics": {
+            "avg_close_rel_diff": 1.3518250647482953e-05,
+            "overlap": 23,
+            "python_count": 23,
+            "swift_count": 23
+          },
+          "status": "pass",
+          "summary": "overlap=23 avg_close_rel_diff=0.0000"
+        },
+        "income_stmt": {
+          "issues": [],
+          "metrics": {
+            "avg_stmt_rel_diff": 0.0009686175188089284,
+            "overlap": 4,
+            "python_count": 4,
+            "swift_count": 4
+          },
+          "status": "pass",
+          "summary": "overlap=4 avg_stmt_rel_diff=0.0010"
+        },
+        "quote": {
+          "issues": [],
+          "metrics": {
+            "fail_diffs": 0,
+            "warn_diffs": 0
+          },
+          "status": "pass",
+          "summary": "0 fail-level, 0 warn-level differences"
+        }
+      },
+      "status": "pass",
+      "swift_errors": [],
+      "swift_ok": true,
+      "symbol": "TSLA"
+    },
+    {
+      "comparisons": {
+        "earnings_dates": {
+          "issues": [],
+          "metrics": {
+            "overlap": 0
+          },
+          "status": "skip",
+          "summary": "No earnings rows from either side"
+        },
+        "history": {
+          "issues": [],
+          "metrics": {
+            "avg_close_rel_diff": 6.950082233669639e-07,
+            "overlap": 23,
+            "python_count": 23,
+            "swift_count": 23
+          },
+          "status": "pass",
+          "summary": "overlap=23 avg_close_rel_diff=0.0000"
+        },
+        "income_stmt": {
+          "issues": [],
+          "metrics": {
+            "overlap": 0
+          },
+          "status": "skip",
+          "summary": "No income rows from either side"
+        },
+        "quote": {
+          "issues": [],
+          "metrics": {
+            "fail_diffs": 0,
+            "warn_diffs": 0
+          },
+          "status": "pass",
+          "summary": "0 fail-level, 0 warn-level differences"
+        }
+      },
+      "status": "skip",
+      "swift_errors": [
+        {
+          "error": "Yahoo API error [Unauthorized]: Invalid Crumb",
+          "operation": "earnings-dates"
+        },
+        {
+          "error": "HTTP error 404",
+          "operation": "income-stmt"
+        }
+      ],
+      "swift_ok": false,
+      "symbol": "VOO"
+    },
+    {
+      "comparisons": {
+        "earnings_dates": {
+          "issues": [],
+          "metrics": {
+            "overlap": 0
+          },
+          "status": "skip",
+          "summary": "No earnings rows from either side"
+        },
+        "history": {
+          "issues": [],
+          "metrics": {
+            "avg_close_rel_diff": 0.0,
+            "overlap": 30,
+            "python_count": 30,
+            "swift_count": 30
+          },
+          "status": "pass",
+          "summary": "overlap=30 avg_close_rel_diff=0.0000"
+        },
+        "income_stmt": {
+          "issues": [],
+          "metrics": {
+            "overlap": 0
+          },
+          "status": "skip",
+          "summary": "No income rows from either side"
+        },
+        "quote": {
+          "issues": [],
+          "metrics": {
+            "fail_diffs": 0,
+            "warn_diffs": 0
+          },
+          "status": "pass",
+          "summary": "0 fail-level, 0 warn-level differences"
+        }
+      },
+      "status": "skip",
+      "swift_errors": [
+        {
+          "error": "Yahoo API error [Unauthorized]: Invalid Crumb",
+          "operation": "earnings-dates"
+        },
+        {
+          "error": "HTTP error 404",
+          "operation": "income-stmt"
+        }
+      ],
+      "swift_ok": false,
+      "symbol": "BTC-USD"
+    }
+  ]
+}
