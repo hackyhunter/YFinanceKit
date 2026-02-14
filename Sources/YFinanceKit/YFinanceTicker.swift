@@ -377,6 +377,21 @@ public struct YFTicker: Sendable, CustomStringConvertible {
         try await client.quoteSummary(symbol: symbol, modules: modules.map(\.rawValue))
     }
 
+    public func profileFundamentals() async throws -> YFProfileFundamentals {
+        let result = try await summaryResult(modules: [
+            "summaryProfile",
+            "summaryDetail",
+            "financialData",
+            "defaultKeyStatistics",
+            "price",
+        ])
+        return Self.parseProfileFundamentals(from: result)
+    }
+
+    public func profile_fundamentals() async throws -> YFProfileFundamentals {
+        try await profileFundamentals()
+    }
+
     public func recommendations() async throws -> YFJSONValue {
         let result = try await summaryResult(modules: ["recommendationTrend"])
         return result["recommendationTrend"]?["trend"] ?? .array([])
@@ -1035,6 +1050,8 @@ public struct YFTicker: Sendable, CustomStringConvertible {
     public func getIsin() async throws -> String? { try await isin() }
     public func getInfo() async throws -> YFJSONValue { try await info() }
     public func getFastInfo() async throws -> YFJSONValue { try await fastInfo() }
+    public func getProfileFundamentals() async throws -> YFProfileFundamentals { try await profileFundamentals() }
+    public func get_profile_fundamentals() async throws -> YFProfileFundamentals { try await profileFundamentals() }
     public func getRecommendations(asDict _: Bool = false) async throws -> YFJSONValue { try await recommendations() }
     public func getRecommendationsSummary(asDict _: Bool = false) async throws -> YFJSONValue {
         try await recommendationsSummary()
@@ -1710,6 +1727,86 @@ public struct YFTicker: Sendable, CustomStringConvertible {
         }
 
         return .array(parsed)
+    }
+
+    static func parseProfileFundamentals(from result: YFJSONValue) -> YFProfileFundamentals {
+        let summaryProfile = result["summaryProfile"]
+        let summaryDetail = result["summaryDetail"]
+        let financialData = result["financialData"]
+        let defaultKeyStatistics = result["defaultKeyStatistics"]
+        let price = result["price"]
+
+        let about = firstNonEmptyString([
+            summaryProfile?["longBusinessSummary"],
+            summaryProfile?["description"],
+            summaryProfile?["longDescription"],
+        ])
+        let sector = firstNonEmptyString([
+            summaryProfile?["sector"],
+            summaryProfile?["category"],
+        ])
+        let industry = firstNonEmptyString([
+            summaryProfile?["industry"],
+            summaryProfile?["industryDisp"],
+        ])
+        let website = firstNonEmptyString([
+            summaryProfile?["website"],
+        ])
+        let marketCap = firstFiniteNumber([
+            price?["marketCap"],
+            summaryDetail?["marketCap"],
+            financialData?["marketCap"],
+            defaultKeyStatistics?["marketCap"],
+        ])
+        let peRatio = firstFiniteNumber([
+            summaryDetail?["trailingPE"],
+            summaryDetail?["forwardPE"],
+            financialData?["trailingPE"],
+            financialData?["forwardPE"],
+            defaultKeyStatistics?["trailingPE"],
+            defaultKeyStatistics?["forwardPE"],
+        ])
+        let currency = firstNonEmptyString([
+            price?["currency"],
+            summaryDetail?["currency"],
+            financialData?["financialCurrency"],
+        ])
+
+        return YFProfileFundamentals(
+            about: about,
+            sector: sector,
+            industry: industry,
+            website: website,
+            marketCap: marketCap,
+            peRatio: peRatio,
+            currency: currency
+        )
+    }
+
+    private static func firstNonEmptyString(_ values: [YFJSONValue?]) -> String? {
+        for value in values {
+            guard let value else {
+                continue
+            }
+            let unwrapped = unwrapRaw(value)
+            if let text = unwrapped.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                return text
+            }
+        }
+        return nil
+    }
+
+    private static func firstFiniteNumber(_ values: [YFJSONValue?]) -> Double? {
+        for value in values {
+            guard let value else {
+                continue
+            }
+            let unwrapped = unwrapRaw(value)
+            if let number = unwrapped.doubleValue, number.isFinite {
+                return number
+            }
+        }
+        return nil
     }
 
     private static func parseOptions(raw: YFJSONValue) -> YFOptionsChain {

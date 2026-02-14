@@ -344,6 +344,34 @@ final class YFinanceKitTests: XCTestCase {
         XCTAssertFalse(is_isin("AAPL"))
     }
 
+    func testProfileFundamentalsParsing() {
+        let payload: YFJSONValue = .object([
+            "summaryProfile": .object([
+                "longBusinessSummary": .object(["raw": .string("  Designs consumer electronics.  ")]),
+                "sector": .object(["fmt": .string("Technology")]),
+                "industry": .string("Consumer Electronics"),
+                "website": .string("https://example.com"),
+            ]),
+            "summaryDetail": .object([
+                "trailingPE": .object(["raw": .number(28.42)]),
+                "currency": .string("USD"),
+            ]),
+            "price": .object([
+                "marketCap": .object(["raw": .number(2_000_000_000_000)]),
+                "currency": .object(["raw": .string("USD")]),
+            ]),
+        ])
+
+        let fundamentals = YFTicker.parseProfileFundamentals(from: payload)
+        XCTAssertEqual(fundamentals.about, "Designs consumer electronics.")
+        XCTAssertEqual(fundamentals.sector, "Technology")
+        XCTAssertEqual(fundamentals.industry, "Consumer Electronics")
+        XCTAssertEqual(fundamentals.website, "https://example.com")
+        XCTAssertEqual(fundamentals.marketCap ?? 0, 2_000_000_000_000, accuracy: 0.5)
+        XCTAssertEqual(fundamentals.peRatio ?? 0, 28.42, accuracy: 0.0001)
+        XCTAssertEqual(fundamentals.currency, "USD")
+    }
+
     func testStartEndOverloadsCompile() {
         let client = YFinanceClient()
         let ticker = YFTicker(symbol: "AAPL", client: client)

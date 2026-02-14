@@ -63,6 +63,34 @@ public enum YFNewsTab: String, Sendable {
     case pressReleases = "press releases"
 }
 
+public struct YFProfileFundamentals: Sendable, Equatable {
+    public let about: String?
+    public let sector: String?
+    public let industry: String?
+    public let website: String?
+    public let marketCap: Double?
+    public let peRatio: Double?
+    public let currency: String?
+
+    public init(
+        about: String? = nil,
+        sector: String? = nil,
+        industry: String? = nil,
+        website: String? = nil,
+        marketCap: Double? = nil,
+        peRatio: Double? = nil,
+        currency: String? = nil
+    ) {
+        self.about = about?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.sector = sector?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.industry = industry?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.website = website?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.marketCap = marketCap
+        self.peRatio = peRatio
+        self.currency = currency?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 public enum YFGroupBy: String, Sendable {
     case column
     case ticker
