@@ -21,7 +21,7 @@ public struct YFRequestBudgetPolicy: Sendable, Equatable {
         self.maxConcurrentRequests = max(1, maxConcurrentRequests)
         self.maxBackgroundRequests = min(
             self.maxConcurrentRequests,
-            max(0, maxBackgroundRequests)
+            max(1, maxBackgroundRequests)
         )
     }
 
@@ -99,20 +99,23 @@ public actor YFRequestBudgetGate {
         }
 
         let id = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                if cancelledBeforeEnqueue.remove(id) != nil || Task.isCancelled {
-                    continuation.resume(throwing: CancellationError())
-                    return
+        try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation { continuation in
+                    if cancelledBeforeEnqueue.remove(id) != nil || Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    waiters.append(
+                        Waiter(id: id, priority: priority, continuation: continuation)
+                    )
+                    drainWaiters()
                 }
-                waiters.append(
-                    Waiter(id: id, priority: priority, continuation: continuation)
-                )
-                drainWaiters()
+            },
+            onCancel: {
+                Task { await self.cancelWaiter(id: id) }
             }
-        } onCancel: {
-            Task { await self.cancelWaiter(id: id) }
-        }
+        )
     }
 
     private func release(priority: YFRequestPriority) {
