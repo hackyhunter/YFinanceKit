@@ -1,6 +1,19 @@
-# YFinanceKit (Swift/iOS port)
+# YFinanceKit
 
-Native Swift package for Yahoo Finance endpoints, designed as a migration path from Python `yfinance` to iOS/macOS.
+Native Swift implementation of Yahoo Finance behavior for iOS/macOS, designed as a migration path from Python `yfinance` while remaining a Swift-native library rather than a mechanical Python translation.
+
+## Build identity
+
+YFinanceKit tracks two versions independently:
+
+- Swift package implementation: `0.2.0-dev.1`
+- upstream yfinance compatibility target: `1.6.0`
+- audited upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
+- audited upstream date: `2026-08-13`
+
+These are exposed through `YFinanceKitBuildInfo` plus compatibility constants such as `__version__`.
+
+The current `0.2.0-dev.1` snapshot has substantial new resilience/hardening work and should be locally built/tested before being treated as a stable release or used to advance an app pin.
 
 ## What is implemented
 
@@ -8,78 +21,173 @@ Native Swift package for Yahoo Finance endpoints, designed as a migration path f
   - `quote`, `history`, `historyMetadata`
   - optional MIC tuple construction for international symbols: `try Ticker(("OR", "XPAR"))` or `try Ticker(symbol: "OR", mic: "XPAR")`
   - history includes parsed events + optional `autoAdjust` / `backAdjust` / `repair` / `keepNa` / `rounding`
-  - history supports both typed enums and Python-style string args (e.g. `"1mo"`, `"1d"`)
+  - history supports both typed enums and Python-style string args such as `"1mo"` and `"1d"`
   - supports both `period` and `start/end` fetch style
-  - Python-signature `history(...)` overload is available with snake_case labels (`auto_adjust`, `back_adjust`, `keepna`, `timeout`)
+  - Python-signature `history(...)` overload with snake_case labels (`auto_adjust`, `back_adjust`, `keepna`, `timeout`)
   - handles Yahoo `30m` fetch quirk via internal `15m` fetch + resample
-  - table outputs for corporate actions: `dividendsTable`, `splitsTable`, `capitalGainsTable`, `actionsTable` (Python-style `Dividends` / `Stock Splits` / `Capital Gains` columns)
+  - table outputs for corporate actions: `dividendsTable`, `splitsTable`, `capitalGainsTable`, `actionsTable`
   - camelCase and snake_case alias methods (`getInfo` + `get_info`, etc.)
-  - Python property-name callability wrappers are included (`major_holders`, `fast_info`, `earnings_dates`, `history_metadata`, etc.)
+  - Python property-name callability wrappers (`major_holders`, `fast_info`, `earnings_dates`, `history_metadata`, etc.)
   - `YFHistorySeries` provides `barsTable()` and `eventsTable()`
   - `optionChain`, `options`
-  - `YFOptionsChain` includes `callsTable()` / `putsTable()` table helpers (Python `_options2df` shape)
-  - `optionChain(expirationDate:)` validates requested date against available expirations (Python-like error behavior)
-  - `optionChain(date:tz:)` / `option_chain(..., tz:)` compatibility overloads
+  - `YFOptionsChain.callsTable()` / `putsTable()` table helpers
+  - option expiration-date validation
   - `info`, `fastInfo`
-  - quote-summary module access (`recommendations`, `calendar`, `secFilings`, holder/insider methods, sustainability, analyst/earnings trend methods)
-  - statement/history methods (`incomeStmt`, `balanceSheet`, `cashFlow`, `financials`)
-  - statement/history methods accept both typed frequency enums and Python-style strings (`"yearly"`, `"quarterly"`, `"trailing"`, `"ttm"`)
-  - statement table helpers (`earningsTable`, `incomeStmtTable`, `balanceSheetTable`, `cashFlowTable`, `financialsTable`)
+  - quote-summary access for recommendations, calendar, SEC filings, holders/insiders, sustainability, and analyst/earnings trend data
+  - `incomeStmt`, `balanceSheet`, `cashFlow`, `financials`
+  - typed frequency enums plus Python-style strings (`yearly`, `quarterly`, `trailing`, `ttm`)
+  - statement table helpers
   - `news`, `earningsDates`, `fundsData`, `fundsDataRaw`, `isin`
-  - `earningsDates` now prefers Yahoo calendar scraping and falls back to visualization payloads when scrape data is unavailable
-  - `fundsData` now returns typed `YFFundsData` (Python `FundsData` style sections + tables)
-  - Python financial convenience aliases: `quarterly_*`, `ttm_*`, `incomestmt`/`balancesheet`/`cashflow`, plus `get_*` variants
+  - `earningsDates` prefers Yahoo calendar scraping with visualization fallback
+  - typed `YFFundsData`
+  - Python financial aliases (`quarterly_*`, `ttm_*`, `incomestmt`/`balancesheet`/`cashflow`, plus `get_*` variants)
 - `Tickers` / `YFTickers`
   - multi-symbol `quote`, `history`, `download`, `news`
-  - matches Python defaults for `Tickers.history`/`download` (`actions: true`)
-  - exposes `tickers` map (`[String: YFTicker]`) like Python `Tickers.tickers`
-  - threaded parallel fetch option (`threads: Bool`)
-  - supports `period` and `start/end` for multi-symbol history/download
-  - Python-signature `history`/`download` method overloads with snake_case labels (`group_by`, `auto_adjust`, `keepna`, `ignore_tz`, `multi_level_index`)
-  - multi-symbol table outputs via `historyTable` / `downloadTable` with `groupBy`, `ignoreTZ`, and `multiLevelIndex` compatibility options
-  - snake_case aliases (`get_history`, `get_download`, `get_history_table`, `get_download_table`, top-level `download_table`)
+  - Python-like defaults for `Tickers.history`/`download`
+  - `tickers` map (`[String: YFTicker]`)
+  - optional threaded parallel fetch
+  - period and start/end history/download
+  - Python-signature snake_case overloads
+  - multi-symbol table outputs via `historyTable` / `downloadTable`
+  - bounded best-effort `infoResult(maxConcurrentRequests:)` and `getInfo(...)`
 - `download` equivalent
   - `yfDownload(...)` and `YF.download(...)`
-  - Python-signature compatibility overloads using snake_case labels (`group_by`, `auto_adjust`, `keepna`, `ignore_tz`, `multi_level_index`)
-  - mixed compatibility signatures are supported (`period: YFinanceClient.Range` with `interval: "1d"` style strings)
+  - Python-signature snake_case compatibility
 - `Search`
-  - `YFSearch` object plus direct `client.search(...)`
-  - Python-style init labels (`max_results`, `include_cb`, `enable_fuzzy_query`, `recommended`, `raise_errors`) and `response`/`get_response` accessors
+  - `YFSearch` plus direct `client.search(...)`
+  - Python-style init labels and raw-response accessors
 - `Lookup`
   - `YFLookup` and typed lookup categories
-  - snake_case getter aliases (`get_all`, `get_stock`, `get_cryptocurrency`, etc.)
-  - table outputs for lookup types (`allTable`, `stockTable`, ... + snake_case table aliases)
+  - snake_case getters and table outputs
 - `Market`
   - market summary + market time/status endpoints
-  - snake_case getter aliases (`get_summary`, `get_status`)
 - `Sector` / `Industry`
-  - domain endpoints
-  - snake_case aliases for domain getters (`top_etfs`, `top_growth_companies`, `get_top_*`, `sector_key`, etc.)
-  - table helpers follow Python-style parsed columns for industries/top-companies summaries
+  - domain endpoints and parsed table helpers
 - `Screener`
-  - predefined and custom query execution
-  - snake_case-compatible `screen(...)` overloads support `size`/`count` and `sortAsc` naming
-  - exported `PREDEFINED_SCREENER_QUERIES` mapping, `PREDEFINED_SCREENER_QUERY_IDS` list, and `PREDEFINED_SCREENER_BODY_DEFAULTS`
-  - query fields are validated when `quoteType` is provided (mirrors Python `EquityQuery`/`FundQuery` validation intent)
+  - predefined/custom queries
+  - equity, fund, and ETF query validation
+  - exported predefined constants
 - `Calendars`
   - earnings / IPO / economic events / splits via visualization API
-  - exported `PREDEFINED_CALENDARS` mapping and `PREDEFINED_CALENDAR_IDS` list constants
-  - snake_case getter compatibility includes optional `force` argument (bypasses local cache, Python-like)
-- Python `utils.py` ISIN helpers
-  - `is_isin`, `get_all_by_isin`, `get_ticker_by_isin`, `get_info_by_isin`, `get_news_by_isin`
-  - `try await Ticker(isin: "...")` convenience initializer
+  - cached payloads with force refresh
+- ISIN helpers
 - Live stream
-  - `WebSocket` + `AsyncWebSocket` wrappers around Yahoo stream endpoint
-  - base64 protobuf payload is decoded into `YFPricingData`
-  - semantic stream mappings for `quoteType` and `marketHours` cover Yahoo's currently published protobuf enum set
-- Config surface
-  - `YF.setConfig(...)`, `YF.enableDebugMode(...)`, `YF.setTZCacheLocation(...)`
-  - Python-style aliases: `set_config(...)`, `set_tz_cache_location(...)`, `enable_debug_mode(...)`
-  - proxy support: set via `set_config(proxy: ...)` and construct a configured client with `await YF.client()` / `await YFinanceClient.configured()`
-  - persistent caches use `config.cacheDirectory` (set via `set_tz_cache_location(...)` / `set_cache_location(...)`) for timezone/ISIN/crumb storage
-  - module constants/aliases include `version`, `__version__`, `__author__`, and `CalendarQuery`
-- DataFrame-like table helpers
-  - `YFTable` now supports `head`, `tail`, `select`, `drop`, `sorted`, `filtered`, `index(by:)`, `transposed()`
+  - `WebSocket` + `AsyncWebSocket`
+  - base64 protobuf payload decode into `YFPricingData`
+- Config
+  - proxy, retry, debug, cache-directory configuration
+  - persistent timezone/ISIN cache support
+- Table helpers
+  - `YFTable` / `YFIndexedTable`
+  - `head`, `tail`, `select`, `drop`, `sorted`, `filtered`, `index(by:)`, `transposed()`
+
+## Yahoo session hardening
+
+The core client uses a shared Yahoo cookie/crumb session for query1/query2 traffic, including chart/history.
+
+The crumb/session layer includes:
+
+- basic Yahoo cookie bootstrap
+- CSRF/consent fallback strategy
+- no independent reuse of a stale persisted crumb from an unrelated cookie session
+- crumb HTTP-status validation
+- rejection of HTML, JSON error bodies, rate-limit bodies, and other implausible crumbs
+- explicit 429 classification
+- fallback when `fc.yahoo.com` is DNS-blocked/unreachable
+- actor serialization so concurrent crumb callers share one bootstrap
+
+URLSession cannot reproduce `curl_cffi` browser TLS/HTTP fingerprint impersonation, so request volume and session correctness are treated conservatively.
+
+## Resilient client
+
+For high-volume/app-facing work, prefer `YFResilientClient` over independently layering retries around `YFinanceClient`.
+
+```swift
+import YFinanceKit
+
+let rawClient = YFinanceClient()
+let client = YFResilientClient(client: rawClient)
+
+let quote = try await client.quoteCached(
+    symbol: "AAPL",
+    freshFor: 15,
+    staleFor: 300
+)
+
+let history = try await client.hardenedHistoryCached(
+    symbol: "AAPL",
+    range: .oneMonth,
+    interval: .oneDay,
+    freshFor: 60,
+    staleFor: 86_400,
+    repair: true
+)
+
+let diagnostics = await client.diagnostics()
+_ = (quote, history, diagnostics)
+```
+
+The resilience layer provides:
+
+- bounded Yahoo concurrency
+- single-flight/coalesced identical quote/history/metadata/financial/info work
+- exponential retry + jitter for transport/5xx-style transient errors
+- no resilience-layer retry for final 429 responses
+- shared stateful rate-limit cooldown
+- fresh/stale/expired in-memory quote/history caches
+- request/cache/coalescing diagnostics
+- injectable clock/jitter sources for deterministic tests
+
+### Known core rate-limit limitation
+
+The legacy query1/query2 request path may still perform one Yahoo cookie-strategy/crumb refresh after a target request fails, including a target 429, before the final 429 reaches `YFRequestCoordinator`.
+
+The resilience layer never adds another retry after that final 429. A future local surgical core change should skip session refresh for target 429 responses and expose `Retry-After` response headers.
+
+## Financial statements
+
+For new code, prefer the typed fundamentals-timeseries implementation:
+
+```swift
+let statement = try await client.financialStatement(
+    symbol: "AAPL",
+    kind: .income,
+    frequency: .yearly
+)
+```
+
+The implementation:
+
+1. attempts one fundamentals-timeseries request
+2. validates empty/error payloads
+3. reactively falls back to 60-key chunks when a long URL fails
+4. merges chunks into typed statement data
+5. does not fan out chunk requests for auth/rate-limit backpressure that shorter URLs cannot fix
+
+## History integrity and repair safety
+
+`YFHistorySeries` includes structural auditing:
+
+```swift
+let report = history.value.integrityReport()
+if !report.isValid {
+    // reject structurally corrupt chart data
+}
+```
+
+Checks include duplicate/non-monotonic timestamps, invalid OHLC, negative volume, non-finite values, and classic unexplained 100x/0.01x jumps.
+
+Additional conservative hardening APIs include:
+
+- `hardened()`
+- `repairingInteriorUnitScaleBlocks()`
+- `normalizingInvalidOHLC()`
+- `trimmingEvents(to:)`
+- `safelyRepairedHistory(...)`
+
+The bounded 100x repair only corrects a strongly evidenced interior block with paired inverse scale transitions. It deliberately does not guess at a lone edge unit switch.
+
+`safelyRepairedHistory(...)` addresses the class of upstream issue described by yfinance PR #2927: if the legacy repair engine marks a suspiciously large fraction of a table, Swift makes one raw comparison request and only replaces the repaired result if raw history proves a bounded interior bad-unit block.
 
 ## Quick start
 
@@ -87,8 +195,8 @@ Native Swift package for Yahoo Finance endpoints, designed as a migration path f
 import YFinanceKit
 
 let client = await YF.client()
-
 let ticker = client.ticker("AAPL")
+
 let quote = try await ticker.quote()
 let history = try await ticker.history(period: .oneMonth, interval: .oneDay)
 let info = try await ticker.info()
@@ -101,15 +209,7 @@ let custom = YFQueryBuilder.and([
     YFQueryBuilder.eq("region", .string("us")),
 ])
 let customResult = try await screen.run(query: custom, quoteType: .equity)
-_ = customResult
-
-let ws = YF.asyncWebSocket()
-try await ws.subscribe("AAPL")
-let stream = await ws.messages()
-for try await message in stream {
-    let livePrice = message.pricingData?.price
-    _ = livePrice
-}
+_ = (quote, history, info, mostActives, customResult)
 ```
 
 ## Python -> Swift examples
@@ -125,26 +225,32 @@ for try await message in stream {
 - `yf.screen("most_actives")`
   - `try await YFScreener().predefined(.mostActives)`
 
-## Important parity gaps
+## Parity and intentional differences
 
-This package now mirrors most endpoint coverage, but it is **not yet a byte-for-byte behavioral clone** of Python `yfinance`.
+YFinanceKit has broad endpoint coverage, but it is not a byte-for-byte clone of Python `yfinance`.
 
-Main differences:
+Main intentional differences:
 
-- No pandas DataFrame/Series outputs; returns typed Swift models or raw JSON values.
-- Price repair is largely ported: 100x unit mixups (sporadic + sudden switches), OHLC normalization, missing/wrong split adjustment repair, corporate-action adjusted-close repairs, Yahoo "live row split" merge fix, and a best-effort reconstruction step for missing/zero OHLC/volume via finer intervals (with Yahoo lookback limits). Full Python edge-case parity is still incomplete.
-- `earnings_dates` now has scrape + visualization fallback, but Yahoo page/schema shifts can still affect exact output parity.
-- DataFrame-specific formatting/index semantics are represented as `YFTable`/`YFIndexedTable` utilities, not pandas.
-- Not all Python convenience aliases/properties are represented as Swift properties; most are methods.
+- no pandas DataFrame/Series runtime dependency
+- native Swift models/tables instead of pandas objects
+- Python implementation details that only exist because of pandas/datetime/packaging are not copied unless they expose a Yahoo behavior requirement
+- Swift uses URLSession rather than `curl_cffi`
+- Python open PRs are treated as regression evidence, not blindly copied implementation
+- repair behavior is tested against Swift-specific invariants and can intentionally differ when that is safer
 
-For iOS app integration this is production-usable, but if you require exact pandas-level parity you should treat this as an ongoing migration layer.
+See:
 
-## Parity Harness
+- `PARITY_STATUS.md`
+- `UPSTREAM_BASELINE.md`
+- `HARDENING.md`
+- `AGENTS.md`
 
-Use the included harness to compare Swift output against Python `yfinance` for a symbol matrix:
+## Parity harness
+
+From a checkout of this standalone repository:
 
 ```bash
-cd /Users/mine/GitHub/yfinance-swift/swift/YFinanceKit
+cd /path/to/YFinanceKit
 python3 tools/parity_harness.py --symbols AAPL,MSFT,NVDA,TSLA,VOO,BTC-USD
 ```
 
@@ -153,4 +259,19 @@ Outputs:
 - `artifacts/parity_report.json`
 - `artifacts/parity_report.md`
 
-The harness runs `swift run YFParityCLI snapshot ...` for normalized Swift payloads and compares them against normalized Python payloads (quote/history/earnings_dates/income_stmt) with tolerance-based checks.
+The harness compares normalized Swift and Python yfinance output for selected quote/history/earnings/financial surfaces with tolerance-based checks.
+
+## Verification
+
+Automatic GitHub Actions and Dependabot are intentionally disabled.
+
+Run locally:
+
+```bash
+bash tools/verify.sh
+bash tools/strict-concurrency.sh
+```
+
+The second command runs the package tests with complete Swift strict-concurrency checking enabled.
+
+Do not tag a stable package release or advance a production app pin until both commands pass on a real checkout.
