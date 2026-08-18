@@ -128,7 +128,7 @@ public actor YFinanceClient {
 
     public init(
         session: URLSession = .shared,
-        userAgent: String = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        userAgent: String = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
         query1BaseURL: URL = URL(string: "https://query1.finance.yahoo.com")!,
         query2BaseURL: URL = URL(string: "https://query2.finance.yahoo.com")!,
         rootBaseURL: URL = URL(string: "https://finance.yahoo.com")!
@@ -807,7 +807,16 @@ public actor YFinanceClient {
         timeout: TimeInterval? = nil
     ) async throws -> Data {
         let baseURL = baseURL(for: host)
-        let crumb = requiresCrumb ? (try await crumbStore.currentCrumb()) : nil
+        let shouldUseCrumb: Bool
+        switch host {
+        case .query1, .query2:
+            // Modern yfinance authenticates Yahoo API traffic through one
+            // cookie/crumb session, including chart/history and timeseries.
+            shouldUseCrumb = true
+        case .root:
+            shouldUseCrumb = requiresCrumb
+        }
+        let crumb = shouldUseCrumb ? (try await crumbStore.currentCrumb()) : nil
         let effectiveTimeout = normalizedTimeout(timeout)
 
         do {
@@ -821,7 +830,7 @@ public actor YFinanceClient {
                 timeout: effectiveTimeout
             )
         } catch {
-            guard requiresCrumb else {
+            guard shouldUseCrumb else {
                 throw error
             }
 
@@ -960,6 +969,12 @@ public actor YFinanceClient {
     }
 
     private func validateResponse(data: Data, response: HTTPURLResponse) throws {
+        // Keep rate limits distinct so callers do not mistake a Yahoo edge
+        // throttle for a malformed finance payload.
+        if response.statusCode == 429 {
+            throw YFinanceError.httpStatus(429)
+        }
+
         if let envelope = try? decoder.decode(YFFinanceErrorEnvelope.self, from: data),
            let yahooError = envelope.finance?.error {
             throw YFinanceError.serverError(
@@ -1129,12 +1144,31 @@ public actor YFinanceClient {
         }
 
         if repair {
+            let originalCurrency = meta.currency
+            let barsBeforeCurrencyStandardization = bars
             let standardized = standardizeSubunitCurrencyIfNeeded(
                 bars: bars,
                 events: historyEvents,
                 meta: meta,
                 calendar: exchangeCalendar
             )
+            let restoreSubunitAfterRepair: Bool = {
+                guard let originalCurrency,
+                      originalCurrency == "GBp" || originalCurrency == "ZAc" || originalCurrency == "ILA" else {
+                    return false
+                }
+                for (before, after) in zip(barsBeforeCurrencyStandardization, standardized.bars) {
+                    guard let beforeClose = before.close,
+                          let afterClose = after.close,
+                          beforeClose.isFinite,
+                          afterClose.isFinite,
+                          beforeClose != 0 else {
+                        continue
+                    }
+                    return abs((afterClose / beforeClose) - 0.01) < 0.000_001
+                }
+                return false
+            }()
             bars = standardized.bars
             historyEvents = standardized.events
             meta = standardized.meta
@@ -1215,6 +1249,18 @@ public actor YFinanceClient {
             }
 
             bars = applySporadicUnitMixupFallbacksIfNeeded(bars, tags: unitMixupsTagged.tags)
+
+            // yfinance 1.6 repairs subunit currencies in major units, then
+            // restores the ticker's original quotation units for callers.
+            if restoreSubunitAfterRepair, let originalCurrency {
+                bars = bars.map { scaleBar($0, factor: 100) }
+                for index in historyEvents.indices where historyEvents[index].kind == .dividend {
+                    if let amount = historyEvents[index].value {
+                        historyEvents[index] = replacingAmount(in: historyEvents[index], value: amount * 100)
+                    }
+                }
+                meta = metaWithCurrency(meta, currency: originalCurrency, scale: 100)
+            }
         }
 
         if autoAdjust || backAdjust {
@@ -1516,9 +1562,6 @@ public actor YFinanceClient {
             return bars
         }
 
-        // Match Python yfinance semantics:
-        // - auto_adjust: Open/High/Low/Close are scaled by AdjClose/Close and "Adj Close" is dropped.
-        // - back_adjust: Open/High/Low are scaled by AdjClose/Close, Close stays unadjusted, and "Adj Close" is dropped.
         return bars.map { bar in
             let ratio: Double = {
                 guard let adj = sanitizePrice(bar.adjustedClose),
@@ -1625,7 +1668,6 @@ public actor YFinanceClient {
         interval: Interval,
         calendar: Calendar
     ) -> [YFHistoryBar] {
-        // Python yfinance fix_Yahoo_dst_issue. Only applies to daily/weekly style bars.
         guard interval == .oneDay || interval == .oneWeek else {
             return bars
         }
@@ -1659,7 +1701,6 @@ public actor YFinanceClient {
         meta: YFHistoryMeta,
         calendar: Calendar
     ) -> [YFHistoryBar] {
-        // Python yfinance fix_Yahoo_returning_prepost_unrequested.
         let isIntraday = interval.rawValue.hasSuffix("m") || interval.rawValue.hasSuffix("h")
         guard isIntraday else {
             return bars
@@ -1951,8 +1992,6 @@ public actor YFinanceClient {
             }
         )
 
-        // Python yfinance _fix_zeroes() ignores intraday days where >50% of rows have NaN/zero prices.
-        // Without this, a single bad day can trigger huge reconstruction attempts.
         let intervalIsIntraday = interval.rawValue.hasSuffix("m") || interval.rawValue.hasSuffix("h")
         var ignoredDayKeys: Set<Int> = []
         if intervalIsIntraday {
@@ -1998,8 +2037,6 @@ public actor YFinanceClient {
                 && sanitizePrice(bar.close) != nil
         }
 
-        // Map coarse bars to reconstruction bucket keys so reconstruction can calibrate fine-grained prices.
-        // Prefer a good-quality representative bar for calibration when available.
         var coarseBarByKey: [Int: YFHistoryBar] = [:]
         coarseBarByKey.reserveCapacity(min(512, sortedBars.count))
         for bar in sortedBars {
@@ -2055,12 +2092,10 @@ public actor YFinanceClient {
             return sortedBars
         }
 
-        // Need at least some good data to calibrate; if everything is bad, don't attempt reconstruction.
         if badBarCount >= sortedBars.count {
             return sortedBars
         }
 
-        // Avoid extremely large reconstruction requests.
         if badKeys.count > 250 {
             return sortedBars
         }
@@ -2111,8 +2146,6 @@ public actor YFinanceClient {
                 weekStartWeekday: weekStartWeekday
             )
 
-            // Calibrate fine-grained aggregates to match the split-adjustment/currency scaling of coarse bars.
-            // Port of Python yfinance _reconstruct_intervals_batch() calibration step.
             var priceScale: Double = 1
             var volumeScale: Double = 1
             do {
@@ -2332,7 +2365,6 @@ public actor YFinanceClient {
     private func reconstructionIncludePrePost(targetInterval: Interval, includePrePost: Bool) -> Bool {
         switch targetInterval {
         case .oneWeek, .oneDay, .fiveDays, .oneMonth, .threeMonths:
-            // Python yfinance treats interday data as always including pre/post.
             return true
         default:
             return includePrePost
@@ -2650,7 +2682,6 @@ public actor YFinanceClient {
             return (bars, events, meta)
         }
 
-        // Use latest row with actual volume, because volume=0 rows can be on the wrong scale.
         guard let lastIndex = bars.indices.reversed().first(where: { (bars[$0].volume ?? 0) > 0 }),
               let lastClose = sanitizePrice(bars[lastIndex].close),
               lastClose > 0 else {
@@ -2663,15 +2694,12 @@ public actor YFinanceClient {
            bars[lastIndex].date > Date().addingTimeInterval(-30 * 24 * 60 * 60) {
             let ratio = regularMarketPrice / lastClose
             if abs((ratio * factor) - 1) < 0.1 {
-                // Within 10% of 100x, assume prices are already in the major currency.
                 pricesInSubunits = false
             }
         }
 
         let scaledBars = pricesInSubunits ? bars.map { scaleBar($0, factor: factor) } : bars
 
-        // Some exchanges return dividends in the same subunits as prices. Use the same heuristic
-        // as yfinance: if average dividend yield is ridiculous after scaling, scale dividends too.
         var scaledEvents = events
         if pricesInSubunits {
             var barIndexByDay: [Int: Int] = [:]
@@ -2772,8 +2800,6 @@ public actor YFinanceClient {
                 fxTicker = "\(priceCurrency)=X"
                 reverse = false
             } else if priceCurrency == "USD" {
-                // Python yfinance attempts to handle this case but uses USD=X which always returns 1.0.
-                // Use the direct USD->currency quote and invert it.
                 fxTicker = "\(divCurrency)=X"
                 reverse = true
             } else if majorCurrencies.contains(divCurrency), majorCurrencies.contains(priceCurrency) {
@@ -2885,7 +2911,6 @@ public actor YFinanceClient {
         guard let candidate = best,
               candidate.ratio.isFinite,
               candidate.ratio > 0 else {
-            // Fallback to the more general sudden-change repair (Python: _fix_unit_switch -> _fix_prices_sudden_change).
             let sudden = repairPricesSuddenChangeIfNeeded(
                 bars: bars,
                 events: events,
@@ -2929,7 +2954,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Python yfinance corrects dividends along with unit-switch repairs.
         let breakDate = repairedBars[candidate.breakIndex].date
         var repairedEvents = events
         for index in repairedEvents.indices {
@@ -2981,8 +3005,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Port of Python yfinance _fix_bad_stock_splits(): for each split event,
-        // run sudden-change repair on a limited prefix window and merge back in.
         var repairedBars = bars
         var repairedEvents = events
 
@@ -2994,7 +3016,6 @@ public actor YFinanceClient {
                 continue
             }
 
-            // Ignore tiny split ratios that could be confused with normal volatility.
             if splitRatio > 0.8 && splitRatio < 1.25 {
                 continue
             }
@@ -3044,9 +3065,6 @@ public actor YFinanceClient {
         correctVolume: Bool,
         correctDividend: Bool
     ) -> (bars: [YFHistoryBar], events: [YFHistoryEvent], didRepair: Bool) {
-        // Focuses on Python yfinance _fix_prices_sudden_change(...) behavior, including
-        // practical false-positive suppression for volume spikes, suspension-like rows,
-        // and local-volatility confirmation.
         guard bars.count >= 2 else {
             return (bars, events, false)
         }
@@ -3054,7 +3072,6 @@ public actor YFinanceClient {
             return (bars, events, false)
         }
 
-        // Do not attempt repair when change is too close to 1.0 (indistinguishable from normal volatility).
         if change > 0.8 && change < 1.25 {
             return (bars, events, false)
         }
@@ -3068,7 +3085,6 @@ public actor YFinanceClient {
         let descBars = bars.sorted { $0.date > $1.date }
         let n = descBars.count
 
-        // Use adjusted prices when available to reduce dividend-volatility false positives.
         var adjustedPrices: [Double] = Array(repeating: 1.0, count: n)
         for i in 0..<n {
             if let adj = sanitizePrice(descBars[i].adjustedClose) {
@@ -3157,7 +3173,6 @@ public actor YFinanceClient {
         }
         let appearsSuspended = noActivity.first == true
 
-        // If all changes are far from split ratio, exit early.
         let splitWindowThreshold = (splitMax - 1) * 0.5 + 1
         if let maxChange = oneStepChange.max(),
            let minChange = oneStepChange.min(),
@@ -3165,7 +3180,6 @@ public actor YFinanceClient {
             return (bars, events, false)
         }
 
-        // Estimate typical 1-step volatility using IQR-filtered ratios.
         let ratioSamples = Array(oneStepChange.dropFirst()).filter { $0.isFinite && $0 > 0 }
         guard ratioSamples.count >= 4,
               let q1 = percentile(ratioSamples, 25),
@@ -3185,7 +3199,6 @@ public actor YFinanceClient {
         let sd = standardDeviation(filtered, mean: avg)
         let sdPct = (avg != 0) ? (sd / avg) : 0
 
-        // Only proceed if split ratio far exceeds typical volatility.
         var largestChangePct = 5 * sdPct
         if isInterday && interval != .oneDay {
             largestChangePct *= 3
@@ -3234,7 +3247,6 @@ public actor YFinanceClient {
         }
         var f = zip(fDown, fUp).map { $0 || $1 }
 
-        // Skip 100x/0.01x repairs if a detected signal is too soon after a real split (suspicious false-positive).
         if (change == 100.0 || change == 0.01), f.contains(true) {
             let splitDates = events.compactMap { event -> Date? in
                 guard event.kind == .split else { return nil }
@@ -3287,7 +3299,6 @@ public actor YFinanceClient {
                     }
                 }
             }
-            // If everything is tied to suspended rows, abort.
             if !f.contains(true) {
                 return (bars, events, false)
             }
@@ -3315,7 +3326,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Suppress large single-point spikes likely tied to short-lived volume events.
         if fDown.contains(true) || fUp.contains(true) {
             for idx in 1..<n {
                 if !f[idx] { continue }
@@ -3345,7 +3355,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Confirm local volatility context so we don't repair normal large price moves.
         for idx in 1..<n where f[idx] {
             let lookback = isInterday ? 10 : (isIntraday ? 100 : 3)
             let start = max(0, idx - lookback)
@@ -3372,12 +3381,12 @@ public actor YFinanceClient {
                         fUpByCol[col][idx] = false
                     }
                 }
-        } else {
-            let local = Array(oneStepChange[start..<end])
-            let localClean = local.filter { $0.isFinite && $0 > 0 }
-            guard !localClean.isEmpty else { continue }
-            let localAvg = localClean.reduce(0, +) / Double(localClean.count)
-            let localSd = standardDeviation(localClean, mean: localAvg)
+            } else {
+                let local = Array(oneStepChange[start..<end])
+                let localClean = local.filter { $0.isFinite && $0 > 0 }
+                guard !localClean.isEmpty else { continue }
+                let localAvg = localClean.reduce(0, +) / Double(localClean.count)
+                let localSd = standardDeviation(localClean, mean: localAvg)
                 guard localAvg != 0 else { continue }
                 var localLargest = 5 * (localSd / localAvg)
                 if isInterday && interval != .oneDay {
@@ -3633,7 +3642,6 @@ public actor YFinanceClient {
             return (bars, events, false)
         }
 
-        // For split repairs (non-100x), prune ranges that are too old: 1y before oldest split in this window.
         if change != 100.0 && change != 0.01 {
             let newest = descBars.first?.date
             let oldest = descBars.last?.date
@@ -3800,9 +3808,6 @@ public actor YFinanceClient {
     private func tagSporadicUnitMixupsForReconstructionIfNeeded(
         _ bars: [YFHistoryBar]
     ) -> (bars: [YFHistoryBar], tags: [Int: UnitMixupTag]) {
-        // Port of Python yfinance _fix_unit_random_mixups(...) tagging stage.
-        // We tag suspicious values by setting them to nil so the reconstruction step can fill
-        // them from finer-grained data. Any remaining nils are handled via crude fallbacks.
         guard bars.count > 1 else {
             return (bars, [:])
         }
@@ -3880,7 +3885,7 @@ public actor YFinanceClient {
                 }
 
                 switch j {
-                case 0: // High
+                case 0:
                     if let original = values[i][j] {
                         record(&tag.high, original: original)
                         taggedBars[i] = YFHistoryBar(
@@ -3894,7 +3899,7 @@ public actor YFinanceClient {
                             repaired: taggedBars[i].repaired
                         )
                     }
-                case 1: // Open
+                case 1:
                     if let original = values[i][j] {
                         record(&tag.open, original: original)
                         taggedBars[i] = YFHistoryBar(
@@ -3908,7 +3913,7 @@ public actor YFinanceClient {
                             repaired: taggedBars[i].repaired
                         )
                     }
-                case 2: // Low
+                case 2:
                     if let original = values[i][j] {
                         record(&tag.low, original: original)
                         taggedBars[i] = YFHistoryBar(
@@ -3922,7 +3927,7 @@ public actor YFinanceClient {
                             repaired: taggedBars[i].repaired
                         )
                     }
-                case 3: // Close
+                case 3:
                     if let original = values[i][j] {
                         record(&tag.close, original: original)
                         if includeAdjClose, let adj = values[i][4] {
@@ -3939,7 +3944,7 @@ public actor YFinanceClient {
                             repaired: taggedBars[i].repaired
                         )
                     }
-                case 4: // Adj Close
+                case 4:
                     if let original = values[i][j] {
                         record(&tag.adjustedClose, original: original)
                         taggedBars[i] = YFHistoryBar(
@@ -4095,8 +4100,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Very rarely Yahoo returns Close already dividend-adjusted (Close < Low by ~dividend).
-        // Port of the first fix in Python _fix_bad_div_adjust.
         for day in dividendsByDay.keys.sorted() {
             guard let dividend = dividendsByDay[day],
                   dividend > 0,
@@ -4175,7 +4178,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Repair obvious 100x dividend unit mixups that leak into adjusted-close factors.
         for day in dividendsByDay.keys.sorted() {
             guard let dividend = dividendsByDay[day],
                   let barIndex = barIndexByDay[day], barIndex > 0,
@@ -4204,7 +4206,6 @@ public actor YFinanceClient {
             setDividendTotal(for: day, oldTotal: dividend, newTotal: correctedDividend)
         }
 
-        // Repair dividends that are ~100x too small compared to the adjusted-close factor.
         for day in dividendsByDay.keys.sorted() {
             guard let dividend = dividendsByDay[day],
                   dividend > 0,
@@ -4245,7 +4246,6 @@ public actor YFinanceClient {
             setDividendTotal(for: day, oldTotal: dividend, newTotal: scaledDividend)
         }
 
-        // Detect and repair double-counted capital gains in adjusted-close history.
         var priceDropMean: Double = 0
         do {
             var changes: [Double] = []
@@ -4322,7 +4322,6 @@ public actor YFinanceClient {
             }
         }
 
-        // Validate adjusted-close split factors and repair obvious missing split adjustments.
         for day in splitRatioByDay.keys.sorted() {
             guard let splitRatio = splitRatioByDay[day],
                   splitRatio > 0,
@@ -4351,7 +4350,6 @@ public actor YFinanceClient {
             applyCorrectionToBars(before: day, correction: correction)
         }
 
-        // Repair missing / wrong dividend adjustments in adjusted-close factors.
         for day in dividendsByDay.keys.sorted() {
             guard let dividend = dividendsByDay[day],
                   dividend > 0,
@@ -4745,7 +4743,7 @@ public actor YFinanceClient {
         case .transport:
             return true
         case .httpStatus(let status):
-            return status >= 500 || status == 429
+            return status >= 500
         default:
             return false
         }

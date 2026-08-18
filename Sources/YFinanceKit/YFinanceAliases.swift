@@ -11,6 +11,8 @@ public typealias WebSocket = YFWebSocket
 public typealias AsyncWebSocket = YFAsyncWebSocket
 public typealias EquityQuery = YFScreenerQuery
 public typealias FundQuery = YFScreenerQuery
+public typealias ETFQuery = YFScreenerQuery
+public typealias Auth = YFAuth
 
 public let __version__ = "1.1.0"
 public let __author__ = "Ran Aroussi"

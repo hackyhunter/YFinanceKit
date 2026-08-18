@@ -7,13 +7,37 @@ extension YFScreenerQuery {
         switch quoteType {
         case .equity:
             allowedFields = YFScreenerConst.equityFields
-            allowedValues = YFScreenerConst.equityValidValues
+                .subtracting(YFScreenerConst.equityFieldRemovals)
+                .union(YFScreenerConst.equityFieldAdditions)
+            allowedValues = Self.mergingAllowedValues(
+                YFScreenerConst.equityValidValues,
+                with: YFScreenerConst.equityValidValueAdditions
+            )
         case .mutualFund:
             allowedFields = YFScreenerConst.fundFields
             allowedValues = YFScreenerConst.fundValidValues
         }
 
         try validateInternal(allowedFields: allowedFields, allowedValues: allowedValues)
+    }
+
+    /// Validates against the ETFQuery field/value set added by Python yfinance 1.3.0.
+    public func validateETF() throws {
+        try validateInternal(
+            allowedFields: YFScreenerConst.etfFields,
+            allowedValues: YFScreenerConst.etfValidValues
+        )
+    }
+
+    private static func mergingAllowedValues(
+        _ base: [String: Set<String>],
+        with additions: [String: Set<String>]
+    ) -> [String: Set<String>] {
+        var merged = base
+        for (key, values) in additions {
+            merged[key, default: []].formUnion(values)
+        }
+        return merged
     }
 
     private func validateInternal(allowedFields: Set<String>, allowedValues: [String: Set<String>]) throws {
