@@ -19,7 +19,11 @@ public enum YFJSONValue: Sendable, Equatable {
             if String(cString: value.objCType) == "c" {
                 self = .bool(value.boolValue)
             } else {
-                self = .number(value.doubleValue)
+                let number = value.doubleValue
+                guard number.isFinite else {
+                    throw YFinanceError.invalidRequest("Non-finite JSON number")
+                }
+                self = .number(number)
             }
         case let value as String:
             self = .string(value)
@@ -58,13 +62,17 @@ public enum YFJSONValue: Sendable, Equatable {
     }
 
     public var doubleValue: Double? {
-        if case .number(let value) = self { return value }
+        if case .number(let value) = self, value.isFinite { return value }
         return nil
     }
 
     public var intValue: Int? {
-        guard let doubleValue else { return nil }
-        return Int(doubleValue)
+        guard let value = doubleValue,
+              value >= Double(Int.min),
+              value <= Double(Int.max) else {
+            return nil
+        }
+        return Int(value)
     }
 
     public subscript(key: String) -> YFJSONValue? {
