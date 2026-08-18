@@ -8,6 +8,21 @@ final class YFinanceErrorClassificationTests: XCTestCase {
         XCTAssertTrue(error.isRateLimited)
         XCTAssertTrue(error.isTransient)
         XCTAssertEqual(error.httpStatusCode, 429)
+        XCTAssertNil(error.retryAfter)
+    }
+
+    func testStructuredRateLimitCarriesRetryAfter() {
+        let error = YFinanceError.rateLimited(retryAfter: 12.5)
+        XCTAssertEqual(error.failureKind, .rateLimited)
+        XCTAssertEqual(error.httpStatusCode, 429)
+        XCTAssertEqual(error.retryAfter, 12.5)
+        XCTAssertTrue(error.isRateLimited)
+    }
+
+    func testStructuredRateLimitWithoutHeaderHasNoRetryAfter() {
+        let error = YFinanceError.rateLimited()
+        XCTAssertEqual(error.failureKind, .rateLimited)
+        XCTAssertNil(error.retryAfter)
     }
 
     func testYahooRateLimitEnvelopeClassification() {
