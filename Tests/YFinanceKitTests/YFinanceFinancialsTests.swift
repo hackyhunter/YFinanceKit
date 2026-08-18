@@ -87,7 +87,7 @@ final class YFinanceFinancialsTests: XCTestCase {
                 frequency: .trailing
             )
             XCTFail("Expected invalid request")
-        } catch YFinanceError.invalidRequest {
+        } catch YFinanceError.invalidRequest(_) {
             // expected
         } catch {
             XCTFail("Unexpected error: \(error)")
