@@ -34,9 +34,10 @@ final class YFinanceResilientClientTests: XCTestCase {
 
         async let first = resilient.quote(symbol: "AAPL")
         async let second = resilient.quote(symbol: "aapl")
-        let results = try await [first, second]
+        let (firstResult, secondResult) = try await (first, second)
+        let symbols = [firstResult?.symbol, secondResult?.symbol].compactMap { $0 }
 
-        XCTAssertEqual(results.compactMap { $0?.symbol }, ["AAPL", "AAPL"])
+        XCTAssertEqual(symbols, ["AAPL", "AAPL"])
         XCTAssertEqual(ResilientURLProtocol.quoteRequestCount, 1)
 
         let diagnostics = await resilient.diagnostics()
