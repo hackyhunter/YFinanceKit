@@ -18,9 +18,11 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Valuation measures via fundamentals-timeseries instead of HTML scraping.
 - GBp/ZAc/ILA repair restores caller-visible quote units after internal major-unit repair.
 - Full fundamentals-timeseries financial statement key sets, including `FixedMaturityInvestments` and `EquityInvestments`.
-- Long fundamentals request fallback to 60-key chunks. Swift additionally tolerates individual empty chunks when other chunks contain valid data.
+- Long fundamentals request fallback to 60-key chunks. Swift additionally tolerates individual empty chunks when other chunks contain valid data and refuses to fan out chunk requests on Yahoo rate-limit/auth backpressure.
 - Structured failure classification for rate limits, authorization failures, server failures, transport failures, malformed data, and Yahoo API errors.
 - Price-repair architecture covering reconstruction, 100x unit anomalies, unit switches, bad splits, corporate-action adjustment repair, OHLC normalization, finer-interval reconstruction, and repair-depth limiting.
+- Read-only history-integrity diagnostics for malformed OHLC, duplicate/non-monotonic timestamps, negative volume, non-finite values, and classic 100x unit jumps that survive processing.
+- Resilient history metadata: try intraday enrichment for `tradingPeriods`, then fall back to daily metadata for otherwise-valid tickers.
 
 ## Intentional Swift differences
 
@@ -29,6 +31,13 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Swift does not implement Python's arbitrary custom-period string parser, so upstream custom-period timezone bugs do not map directly.
 - Calendar endpoint values are kept as Yahoo JSON until callers format them, so Python's local-time `datetime.fromtimestamp()` calendar bug does not map directly.
 - Automatic GitHub Actions and Dependabot are intentionally disabled for this repository; verification is expected to be run manually/local before releases.
+
+## Known remaining gaps / deliberate follow-ups
+
+- The core query1/query2 request layer currently invalidates/refetches the Yahoo crumb once after a failed authenticated request. That recovery is useful for 401/403/session failures, but it can also cause one alternate-session retry after a target HTTP 429 before the rate limit reaches the caller. A future surgical core edit should skip session refresh for 429 and treat it strictly as backpressure.
+- Python yfinance 1.6 rewrites some Yahoo error text when a user asks for 30m data but the internal fetch uses 15m. Swift still surfaces the Yahoo description from the internal request without that user-facing annotation.
+- Open upstream repair PRs are not copied blindly. In particular, the interior 100x-block work should be adopted only after it merges or after an equivalent Swift regression fixture proves a real gap.
+- Full Xcode/SwiftPM verification is intentionally not delegated to automatic Actions. The package contains offline regression tests, but the definitive app integration pass should be run locally in Xcode before changing `nommminal` to consume diagnostic APIs added after its current pinned commit.
 
 ## Upstream watch
 
