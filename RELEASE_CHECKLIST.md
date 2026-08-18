@@ -35,7 +35,23 @@ Prioritize:
 
 Update `UPSTREAM_BASELINE.md` with decisions. Open PRs are regression evidence, not automatically accepted implementation.
 
-## 3. Local package verification
+## 3. Apply the remaining surgical core rate-limit patch
+
+The compatibility client is intentionally not whole-file rewritten through remote tooling. In a local checkout run:
+
+```sh
+python3 tools/apply-core-rate-limit-hardening.py
+```
+
+Review the resulting diff. It must remain narrowly scoped to:
+
+- target-endpoint 429 bypasses crumb/session-strategy refresh
+- HTTP `Retry-After` is parsed into structured `YFinanceError.retryAfter`
+- `YFRequestCoordinator` honors provider `Retry-After` when opening cooldown
+
+Do not accept unrelated giant-client churn in this step.
+
+## 4. Local package verification
 
 Run:
 
@@ -48,7 +64,7 @@ Both must pass.
 
 Do not re-enable automatic GitHub Actions to satisfy this gate.
 
-## 4. High-value offline regression suites
+## 5. High-value offline regression suites
 
 Confirm coverage is green for at least:
 
@@ -57,10 +73,13 @@ Confirm coverage is green for at least:
 - concurrent crumb callers
 - invalid crumb bodies
 - rate-limit classification/cooldown
+- `Retry-After` parsing/metadata
+- bounded and prioritized request scheduling
+- queued request cancellation
 - single-flight request coalescing
 - fresh/stale cache behavior
 - financial long-URL chunk fallback
-- malformed/null JSON
+- malformed/null/type-shifted Yahoo JSON
 - history integrity
 - repair parity
 - bounded interior 100x repair
@@ -68,33 +87,28 @@ Confirm coverage is green for at least:
 - history metadata fallback
 - multi-info partial failure
 - UTC/exchange date semantics
+- redacted diagnostics export and endpoint rollups
+- focused quote/history/metadata/financial service façades
 
-## 5. Parity harness
+## 6. Parity harness
 
-Run a representative symbol matrix, including when possible:
-
-- US equities
-- ETF
-- mutual fund
-- London GBp
-- Johannesburg ZAc
-- Tel Aviv ILA
-- FX
-- crypto
-- index
-- invalid/delisted symbol
-- ticker with recent split/dividend
-- thinly traded ticker
-
-Example:
+Start with a targeted run:
 
 ```sh
 python3 tools/parity_harness.py --symbols AAPL,MSFT,VOO,BTC-USD
 ```
 
-Inspect both warnings and failures. Do not blindly require byte-for-byte pandas parity where Swift intentionally differs.
+Then run the broader cross-market matrix:
 
-## 6. Live Yahoo smoke
+```sh
+python3 tools/parity_matrix.py
+```
+
+The matrix includes US equities/ETFs, intraday, UK subunit quotes, Europe, Asia-Pacific, Johannesburg/Tel Aviv, crypto/FX and indices.
+
+Inspect warnings and failures. Do not blindly require byte-for-byte pandas parity where Swift intentionally differs. Generated reports are evidence for the exact tested commit only.
+
+## 7. Live Yahoo smoke
 
 After offline tests pass, perform a small live smoke from a normal residential/device network:
 
@@ -109,7 +123,7 @@ After offline tests pass, perform a small live smoke from a normal residential/d
 
 Avoid large live matrices that unnecessarily pressure Yahoo.
 
-## 7. Version decision
+## 8. Version decision
 
 Only after the previous gates pass:
 
@@ -119,25 +133,30 @@ Only after the previous gates pass:
 
 Do not change `__version__` unless the upstream yfinance compatibility target changed.
 
-## 8. nommminal app-pin migration
+## 9. nommminal app-pin migration
 
-Before changing `hackyhunter/nommminal`:
+Use the `yfinance-hardening-integration` branch as the staged integration path.
+
+Before changing `master`:
 
 1. choose the exact verified YFinanceKit commit/tag
 2. update every app/package/Xcode reference together
-3. run ProviderParity tests
-4. run JavaScript bridge/chart tests
-5. build Debug simulator
-6. build Release simulator
-7. launch simulator smoke
-8. test quote/history/revenue/earnings/options
-9. test 429/error behavior
-10. test cancellation and stale cache behavior
-11. test app-local disk snapshot fallback if wired
-12. run a real-device Yahoo/session smoke when practical
+3. run `python3 scripts/apply-yfinance-hardening-integration.py`
+4. run `python3 scripts/verify-yfinance-hardening.py`
+5. run ProviderParity tests
+6. run JavaScript bridge/chart tests
+7. build Debug simulator
+8. build Release simulator
+9. launch simulator smoke
+10. test quote/history/revenue/earnings/options
+11. verify JS/native 429 makes one native attempt, then cools down
+12. verify JS cancellation cancels the actual Swift/Yahoo task
+13. test in-memory stale cache and app-local disk snapshot fallback
+14. verify bridge-v2 metadata does not alter endpoint `data` keys
+15. run a real-device Yahoo/session smoke when practical
 
-If signing/capabilities change, validate those separately in Xcode.
+If signing/capabilities change, validate those separately in Xcode. App/widget sharing still requires adding an App Group capability; the current widget does not contact Yahoo.
 
-## 9. Rollback point
+## 10. Rollback point
 
 Before app migration, record the previous known-good YFinanceKit app pin so the integration can be reverted immediately if device behavior differs from simulator/offline tests.
