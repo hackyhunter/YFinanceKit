@@ -1,8 +1,8 @@
 name: CI
 
+# Manual-only. Automatic CI is intentionally disabled to avoid consuming
+# GitHub Actions minutes on pushes and pull requests.
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 jobs:
