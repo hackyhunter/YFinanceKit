@@ -281,6 +281,9 @@ public extension YFinanceClient {
             raw = single
             mode = .singleRequest
         } catch {
+            guard Self.shouldFallbackToChunkedFundamentals(after: error) else {
+                throw error
+            }
             raw = try await fundamentalsChunkedPayload(
                 symbol: cleanedSymbol,
                 types: types,
@@ -378,6 +381,9 @@ public extension YFinanceClient {
                 let payload = try await fundamentalsPayload(symbol: symbol, types: chunk, timeout: timeout)
                 merged.append(contentsOf: Self.fundamentalsResult(from: payload))
             } catch {
+                guard Self.shouldFallbackToChunkedFundamentals(after: error) else {
+                    throw error
+                }
                 lastError = error
             }
             startIndex = endIndex
@@ -394,6 +400,15 @@ public extension YFinanceClient {
                 "error": .null,
             ]),
         ])
+    }
+
+    private static func shouldFallbackToChunkedFundamentals(after error: Error) -> Bool {
+        switch YFinanceErrorClassifier.kind(of: error) {
+        case .transport, .serverUnavailable, .missingData, .decoding, .unknown:
+            return true
+        case .invalidRequest, .unauthorized, .forbidden, .notFound, .rateLimited, .yahooAPI:
+            return false
+        }
     }
 
     private static func fundamentalsResult(from payload: YFJSONValue) -> [YFJSONValue] {
