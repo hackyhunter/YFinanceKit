@@ -15,6 +15,19 @@ public enum YFinanceFailureKind: String, Sendable {
 }
 
 public extension YFinanceError {
+    /// Encodes provider backpressure without adding another enum case that would
+    /// make downstream exhaustive switches source-breaking. `retryAfter` parses
+    /// the machine-readable suffix back out when present.
+    static func rateLimited(retryAfter: TimeInterval? = nil) -> YFinanceError {
+        let description: String
+        if let retryAfter, retryAfter.isFinite, retryAfter >= 0 {
+            description = "Rate limited; retry-after-seconds=\(retryAfter)"
+        } else {
+            description = "Rate limited"
+        }
+        return .serverError(code: "429", description: description)
+    }
+
     var failureKind: YFinanceFailureKind {
         switch self {
         case .invalidURL, .invalidRequest:
@@ -58,6 +71,28 @@ public extension YFinanceError {
         default:
             return nil
         }
+    }
+
+    /// Provider-requested backoff when an HTTP `Retry-After` value was available.
+    /// Legacy `.httpStatus(429)` errors correctly return nil.
+    var retryAfter: TimeInterval? {
+        guard case .serverError(let code, let description) = self,
+              code == "429",
+              let marker = description.range(of: "retry-after-seconds=") else {
+            return nil
+        }
+
+        let suffix = description[marker.upperBound...]
+        let token = suffix.prefix { character in
+            character.isNumber || character == "."
+        }
+        guard !token.isEmpty,
+              let value = TimeInterval(String(token)),
+              value.isFinite,
+              value >= 0 else {
+            return nil
+        }
+        return value
     }
 
     var isRateLimited: Bool { failureKind == .rateLimited }
