@@ -10,7 +10,9 @@ echo "== Python hardening/parity script syntax =="
 python3 -m py_compile \
   tools/parity_harness.py \
   tools/parity_matrix.py \
-  tools/apply-core-rate-limit-hardening.py
+  tools/apply-transport-extraction.py \
+  tools/apply-core-rate-limit-hardening.py \
+  tools/prepare-hardening-candidate.py
 
 echo "== Package manifest =="
 swift package dump-package >/dev/null
