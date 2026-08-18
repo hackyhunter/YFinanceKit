@@ -3,8 +3,8 @@ import Foundation
 /// Narrow dependency-injection surface for high-volume Yahoo operations.
 ///
 /// App code should depend on this protocol rather than the concrete
-/// `YFinanceClient` actor. That keeps the 174KB compatibility client behind a
-/// façade and lets endpoint mappers/tests substitute deterministic providers.
+/// `YFinanceClient` actor. That keeps the compatibility client behind a façade
+/// and lets endpoint mappers/tests substitute deterministic providers.
 public protocol YFResilientMarketDataProviding: Sendable {
     func quote(symbol: String) async throws -> YFQuote?
 
@@ -70,6 +70,48 @@ public protocol YFQuoteProviding: Sendable {
     func quote(symbol: String) async throws -> YFQuote?
 }
 
+public protocol YFCachedQuoteProviding: YFQuoteProviding {
+    func quoteCached(
+        symbol: String,
+        freshFor: TimeInterval,
+        staleFor: TimeInterval
+    ) async throws -> YFCachedResult<YFQuote?>
+}
+
+public protocol YFHistoryProviding: Sendable {
+    func history(
+        symbol: String,
+        range: YFinanceClient.Range,
+        interval: YFinanceClient.Interval,
+        includePrePost: Bool,
+        events: Set<YFinanceClient.HistoryEvent>,
+        autoAdjust: Bool,
+        backAdjust: Bool,
+        repair: Bool,
+        keepNa: Bool,
+        rounding: Bool,
+        timeout: TimeInterval?
+    ) async throws -> YFHistorySeries
+}
+
+public protocol YFCachedHistoryProviding: YFHistoryProviding {
+    func historyCached(
+        symbol: String,
+        range: YFinanceClient.Range,
+        interval: YFinanceClient.Interval,
+        freshFor: TimeInterval,
+        staleFor: TimeInterval,
+        includePrePost: Bool,
+        events: Set<YFinanceClient.HistoryEvent>,
+        autoAdjust: Bool,
+        backAdjust: Bool,
+        repair: Bool,
+        keepNa: Bool,
+        rounding: Bool,
+        timeout: TimeInterval?
+    ) async throws -> YFCachedResult<YFHistorySeries>
+}
+
 public protocol YFHistoryMetadataProviding: Sendable {
     func historyMetadata(
         symbol: String,
@@ -86,4 +128,11 @@ public protocol YFFinancialStatementProviding: Sendable {
     ) async throws -> YFFinancialStatementSeries
 }
 
-extension YFResilientClient: YFQuoteProviding, YFHistoryMetadataProviding, YFFinancialStatementProviding {}
+extension YFResilientClient:
+    YFQuoteProviding,
+    YFCachedQuoteProviding,
+    YFHistoryProviding,
+    YFCachedHistoryProviding,
+    YFHistoryMetadataProviding,
+    YFFinancialStatementProviding
+{}
