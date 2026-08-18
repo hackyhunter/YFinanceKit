@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Apply the remaining surgical 429/Retry-After core edits.
 
-The target files include the large compatibility client. This script uses exact
-source replacements and refuses to guess if the implementation has drifted.
-Run it in a local checkout before the final verification gate.
+This script is composable with `apply-transport-extraction.py`. It refuses to
+guess if source has drifted. When transport extraction already moved response
+headers into Sendable values, the 429 parser step is recognized as complete and
+only the crumb-recovery/coordinator edits are applied.
 """
 
 from __future__ import annotations
@@ -37,19 +38,28 @@ def patch_client() -> bool:
     new_recovery = """        } catch {\n            // A target-endpoint 429 is provider backpressure, not evidence that\n            // the Yahoo cookie/crumb strategy is invalid. Do not generate a\n            // second request by switching/refreshing the session.\n            if YFinanceErrorClassifier.kind(of: error) == .rateLimited {\n                throw error\n            }\n\n            guard shouldUseCrumb else {\n                throw error\n            }\n\n            await crumbStore.invalidate()\n            let refreshedCrumb = try await crumbStore.currentCrumb(forceRefresh: true)\n            return try await executeRequest(\n                baseURL: baseURL,\n                path: path,\n                queryItems: withCrumb(queryItems, crumb: refreshedCrumb),\n                method: method,\n                body: body,\n                headers: headers,\n                timeout: effectiveTimeout\n            )\n        }\n"""
     changed |= replace_exact(CLIENT, old_recovery, new_recovery)
 
-    old_429 = """        if response.statusCode == 429 {\n            throw YFinanceError.httpStatus(429)\n        }\n"""
-    new_429 = """        if response.statusCode == 429 {\n            let retryAfter = YFRetryAfterParser.parse(\n                response.value(forHTTPHeaderField: \"Retry-After\")\n            )\n            throw YFinanceError.rateLimited(retryAfter: retryAfter)\n        }\n"""
-    changed |= replace_exact(CLIENT, old_429, new_429)
+    client_text = CLIENT.read_text(encoding="utf-8")
+    retry_after_already_extracted = (
+        "retryAfterHeader: String?" in client_text
+        and "YFRetryAfterParser.parse(retryAfterHeader)" in client_text
+        and "YFinanceError.rateLimited(retryAfter: retryAfter)" in client_text
+    )
+
+    if not retry_after_already_extracted:
+        old_429 = """        if response.statusCode == 429 {\n            throw YFinanceError.httpStatus(429)\n        }\n"""
+        new_429 = """        if response.statusCode == 429 {\n            let retryAfter = YFRetryAfterParser.parse(\n                response.value(forHTTPHeaderField: \"Retry-After\")\n            )\n            throw YFinanceError.rateLimited(retryAfter: retryAfter)\n        }\n"""
+        changed |= replace_exact(CLIENT, old_429, new_429)
 
     final = CLIENT.read_text(encoding="utf-8")
-    required = [
-        "YFinanceErrorClassifier.kind(of: error) == .rateLimited",
-        "response.value(forHTTPHeaderField: \"Retry-After\")",
-        "YFinanceError.rateLimited(retryAfter: retryAfter)",
-    ]
-    for fragment in required:
-        if fragment not in final:
-            raise MigrationError(f"Client patch missing expected fragment: {fragment}")
+    if "YFinanceErrorClassifier.kind(of: error) == .rateLimited" not in final:
+        raise MigrationError("Client patch is missing strict 429 crumb-recovery bypass")
+    if "YFinanceError.rateLimited(retryAfter: retryAfter)" not in final:
+        raise MigrationError("Client patch is missing Retry-After-aware 429 error")
+    if not (
+        "response.value(forHTTPHeaderField: \"Retry-After\")" in final
+        or "retryAfterHeader: String?" in final
+    ):
+        raise MigrationError("Client patch is missing a Retry-After header path")
     return changed
 
 
