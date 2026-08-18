@@ -20,12 +20,16 @@ public let __author__ = "Ran Aroussi"
 public let version = __version__
 
 public enum YFinanceKitBuildInfo {
+    /// Swift package implementation version. Kept separate from Python yfinance
+    /// compatibility so consumers can reason about both independently.
+    public static let packageVersion = "0.2.0-dev.1"
     public static let upstreamVersion = "1.6.0"
     public static let upstreamCommit = "0af231f6a47eee5e773290830d228de0c20d5ee1"
     public static let upstreamDate = "2026-08-13"
     public static let implementation = "Swift"
 }
 
+public let yfinancekit_version = YFinanceKitBuildInfo.packageVersion
 public let yfinance_upstream_version = YFinanceKitBuildInfo.upstreamVersion
 public let yfinance_upstream_commit = YFinanceKitBuildInfo.upstreamCommit
 
