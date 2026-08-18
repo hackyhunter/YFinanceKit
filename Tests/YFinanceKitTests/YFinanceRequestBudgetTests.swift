@@ -41,7 +41,8 @@ final class YFinanceRequestBudgetTests: XCTestCase {
         _ = try await interactive.value
         _ = try await normal.value
 
-        XCTAssertEqual(await probe.values(), ["background", "interactive", "normal"])
+        let values = await probe.values()
+        XCTAssertEqual(values, ["background", "interactive", "normal"])
     }
 
     func testBackgroundConcurrencyHasIndependentCap() async throws {
@@ -97,7 +98,8 @@ final class YFinanceRequestBudgetTests: XCTestCase {
         }
 
         await waitUntil {
-            await gate.snapshot().queuedNormal == 1
+            let snapshot = await gate.snapshot()
+            return snapshot.queuedNormal == 1
         }
         queued.cancel()
 
@@ -109,7 +111,8 @@ final class YFinanceRequestBudgetTests: XCTestCase {
         }
 
         await waitUntil {
-            await gate.snapshot().queuedNormal == 0
+            let snapshot = await gate.snapshot()
+            return snapshot.queuedNormal == 0
         }
         await probe.release()
         _ = try await holder.value
