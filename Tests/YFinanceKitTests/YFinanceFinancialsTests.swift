@@ -78,6 +78,48 @@ final class YFinanceFinancialsTests: XCTestCase {
         XCTAssertEqual(statement.periodTable().rowCount, 1)
     }
 
+    func testRateLimitDuringSessionBootstrapDoesNotTriggerChunkFallback() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FinancialsURLProtocol.self]
+        let client = YFinanceClient(session: URLSession(configuration: configuration))
+        var fundamentalsRequests = 0
+
+        FinancialsURLProtocol.handler = { request in
+            guard let url = request.url else { throw FinancialsTestError.missingURL }
+            if url.host == "fc.yahoo.com" {
+                return Self.response(url: url, body: "ok", contentType: "text/plain")
+            }
+            if url.path == "/v1/test/getcrumb" {
+                return Self.response(
+                    url: url,
+                    status: 429,
+                    body: "Edge: Too Many Requests",
+                    contentType: "text/plain"
+                )
+            }
+            if url.path.contains("/ws/fundamentals-timeseries/") {
+                fundamentalsRequests += 1
+                return Self.response(url: url, body: #"{"timeseries":{"result":[],"error":null}}"#)
+            }
+            throw FinancialsTestError.unexpectedURL(url.absoluteString)
+        }
+
+        do {
+            _ = try await client.financialStatement(
+                symbol: "AAPL",
+                kind: .income,
+                frequency: .yearly
+            )
+            XCTFail("Expected rate-limit error")
+        } catch YFinanceError.httpStatus(let status) {
+            XCTAssertEqual(status, 429)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(fundamentalsRequests, 0, "A rate-limited Yahoo session must not fan out into fundamentals chunks")
+    }
+
     func testTrailingBalanceSheetIsRejected() async throws {
         let client = YFinanceClient()
         do {
