@@ -15,13 +15,13 @@ final class YFinanceRetryAfterTests: XCTestCase {
     }
 
     func testParsesHTTPDateRelativeToInjectedClock() {
-        let now = Date(timeIntervalSince1970: 1_784_403_200) // 2026-07-18 00:00:00 UTC
+        let now = Date(timeIntervalSince1970: 1_784_332_800) // 2026-07-18 00:00:00 UTC
         let raw = "Sat, 18 Jul 2026 00:00:30 GMT"
         XCTAssertEqual(YFRetryAfterParser.parse(raw, now: now), 30)
     }
 
     func testPastHTTPDateReturnsZero() {
-        let now = Date(timeIntervalSince1970: 1_784_403_200)
+        let now = Date(timeIntervalSince1970: 1_784_332_800)
         let raw = "Fri, 17 Jul 2026 23:59:00 GMT"
         XCTAssertEqual(YFRetryAfterParser.parse(raw, now: now), 0)
     }
