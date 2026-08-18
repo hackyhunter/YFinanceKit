@@ -30,7 +30,8 @@ final class YFinanceResilienceTests: XCTestCase {
         }
 
         XCTAssertEqual(value, "ok")
-        XCTAssertEqual(await counter.value(), 3)
+        let attemptCount = await counter.value()
+        XCTAssertEqual(attemptCount, 3)
         let snapshot = await coordinator.snapshot()
         XCTAssertEqual(snapshot.attempts, 3)
         XCTAssertEqual(snapshot.retries, 2)
@@ -67,7 +68,8 @@ final class YFinanceResilienceTests: XCTestCase {
             XCTAssertTrue(error.isRateLimited)
         }
 
-        XCTAssertEqual(await counter.value(), 1, "429 must never be retried by the coordinator")
+        let rateLimitAttempts = await counter.value()
+        XCTAssertEqual(rateLimitAttempts, 1, "429 must never be retried by the coordinator")
         var snapshot = await coordinator.snapshot()
         XCTAssertEqual(snapshot.rateLimits, 1)
         XCTAssertEqual(snapshot.failures, 1)
@@ -77,7 +79,8 @@ final class YFinanceResilienceTests: XCTestCase {
             7
         }
         XCTAssertEqual(value, 7)
-        XCTAssertGreaterThanOrEqual(await clock.now(), start.addingTimeInterval(4))
+        let timeAfterCooldown = await clock.now()
+        XCTAssertGreaterThanOrEqual(timeAfterCooldown, start.addingTimeInterval(4))
 
         snapshot = await coordinator.snapshot()
         XCTAssertEqual(snapshot.successes, 1)
