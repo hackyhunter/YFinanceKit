@@ -12,7 +12,11 @@ python3 -m py_compile \
   tools/parity_matrix.py \
   tools/apply-transport-extraction.py \
   tools/apply-core-rate-limit-hardening.py \
-  tools/prepare-hardening-candidate.py
+  tools/prepare-hardening-candidate.py \
+  tools/verify-hardening-source-state.py
+
+echo "== Static hardening source state =="
+python3 tools/verify-hardening-source-state.py
 
 echo "== Package manifest =="
 swift package dump-package >/dev/null
