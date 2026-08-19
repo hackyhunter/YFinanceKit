@@ -8,7 +8,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Upstream compatibility target: **yfinance 1.6.0**
 - Upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
 - Upstream date: **2026-08-13**
-- Review date: **2026-08-18**
+- Review date: **2026-08-19**
 
 ## Ported from the 1.3-1.6 cycle
 
@@ -23,7 +23,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Structured failure classification for rate limits, authorization failures, server failures, transport failures, malformed data, and Yahoo API errors.
 - Price-repair architecture covering reconstruction, 100x unit anomalies, unit switches, bad splits, corporate-action adjustment repair, OHLC normalization, finer-interval reconstruction, and repair-depth limiting.
 - Read-only history-integrity diagnostics for malformed OHLC, duplicate/non-monotonic timestamps, negative volume, non-finite values, and classic 100x unit jumps that survive processing.
-- Resilient history metadata: try intraday enrichment for `tradingPeriods`, then fall back to daily metadata for otherwise-valid tickers.
+- Lazy history metadata parity from upstream PR #2922: recent typed chart/history decode seeds core symbol metadata; `5d/1h` `tradingPeriods` enrichment is explicit, cached, and non-fatal on failure.
 
 ## Swift hardening beyond direct parity
 
@@ -39,6 +39,10 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Session regression tests cover DNS-blocked `fc.yahoo.com`, concurrent crumb callers, and 200-OK HTML/garbage crumb bodies.
 
 ## August 2026 upstream PR review
+
+### PR #2922: lazy `tradingPeriods` history metadata
+
+**Ported.** Typed chart/history responses seed a short-lived core metadata snapshot, so `history()` followed by core metadata access does not trigger a second chart fetch. The `5d/1h` request is reserved for explicit `tradingPeriods` enrichment, cached after success, and enrichment failure leaves core metadata usable.
 
 ### PR #2927: genuine partial 100x blocks / unit-switch revert
 
