@@ -149,6 +149,49 @@ final class YFDecodedHistoryMetadataStore: @unchecked Sendable {
     }
 }
 
+extension YFHistoryMeta {
+    public init(from decoder: Decoder) throws {
+        enum CodingKeys: String, CodingKey {
+            case currency
+            case symbol
+            case exchangeName
+            case instrumentType
+            case timezone
+            case exchangeTimezoneName
+            case regularMarketPrice
+            case chartPreviousClose
+            case previousClose
+            case gmtoffset
+            case dataGranularity
+            case priceHint
+            case range
+            case validRanges
+            case lastTrade
+            case tradingPeriods
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        currency = try container.decodeIfPresent(String.self, forKey: .currency)
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
+        exchangeName = try container.decodeIfPresent(String.self, forKey: .exchangeName)
+        instrumentType = try container.decodeIfPresent(String.self, forKey: .instrumentType)
+        timezone = try container.decodeIfPresent(String.self, forKey: .timezone)
+        exchangeTimezoneName = try container.decodeIfPresent(String.self, forKey: .exchangeTimezoneName)
+        regularMarketPrice = try container.decodeIfPresent(Double.self, forKey: .regularMarketPrice)
+        chartPreviousClose = try container.decodeIfPresent(Double.self, forKey: .chartPreviousClose)
+        previousClose = try container.decodeIfPresent(Double.self, forKey: .previousClose)
+        gmtoffset = try container.decodeIfPresent(Int.self, forKey: .gmtoffset)
+        dataGranularity = try container.decodeIfPresent(String.self, forKey: .dataGranularity)
+        priceHint = try container.decodeIfPresent(Int.self, forKey: .priceHint)
+        range = try container.decodeIfPresent(String.self, forKey: .range)
+        validRanges = try container.decodeIfPresent([String].self, forKey: .validRanges)
+        lastTrade = try container.decodeIfPresent(YFHistoryLastTrade.self, forKey: .lastTrade)
+        tradingPeriods = try container.decodeIfPresent(YFTradingPeriods.self, forKey: .tradingPeriods)
+
+        YFDecodedHistoryMetadataStore.shared.record(self)
+    }
+}
+
 private func yfMetadataHasTradingPeriods(_ metadata: YFJSONValue) -> Bool {
     guard let tradingPeriods = metadata["tradingPeriods"] else { return false }
     switch tradingPeriods {
