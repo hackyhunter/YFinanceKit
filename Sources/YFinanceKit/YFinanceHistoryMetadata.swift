@@ -207,6 +207,37 @@ private func yfMetadataHasTradingPeriods(_ metadata: YFJSONValue) -> Bool {
 }
 
 public extension YFinanceClient {
+    /// Compatibility overload used by the existing `YFTicker.historyMetadata()`
+    /// implementation. Swift prefers this exact four-argument overload over
+    /// the older overload whose trailing arguments have defaults. The special
+    /// metadata request is redirected to core metadata instead of eagerly
+    /// issuing Yahoo's `5d/1h` chart request.
+    func historyRaw(
+        symbol: String,
+        range: Range,
+        interval: Interval,
+        includePrePost: Bool
+    ) async throws -> YFJSONValue {
+        if range == .fiveDays, interval == .oneHour, includePrePost {
+            let metadata = try await robustHistoryMetadata(symbol: symbol).metadata
+            return .object([
+                "chart": .object([
+                    "result": .array([.object(["meta": metadata])]),
+                    "error": .null,
+                ]),
+            ])
+        }
+
+        return try await historyRaw(
+            symbol: symbol,
+            range: range,
+            interval: interval,
+            includePrePost: includePrePost,
+            events: [.dividends, .splits],
+            timeout: nil
+        )
+    }
+
     /// Returns core history metadata without paying for intraday enrichment.
     /// A recent typed chart/history response for this symbol is reused when
     /// available, so `history()` followed by metadata access needs no chart
