@@ -2,100 +2,149 @@
 
 ## Mission
 
-`YFinanceKit` is the canonical Swift implementation of Yahoo Finance behavior for the `nommminal` app and other Swift consumers. Python `ranaroussi/yfinance` is an upstream behavioral oracle, not a source tree to mechanically translate.
+`YFinanceKit` is the canonical Swift implementation of Yahoo Finance behavior for `nommminal` and other Swift consumers. Python `ranaroussi/yfinance` is an upstream behavioral oracle, not a source tree to mechanically translate.
 
-The package currently targets upstream yfinance **1.6.0** at commit:
+The compatibility target is yfinance **1.6.0** at upstream commit:
 
 `0af231f6a47eee5e773290830d228de0c20d5ee1`
 
-Keep Swift package versioning separate from upstream compatibility. See `YFinanceKitBuildInfo`.
+Keep the Swift package version separate from the upstream compatibility version. See `YFinanceKitBuildInfo`.
 
 ## Hard rules
 
 1. **Do not re-enable automatic GitHub Actions or Dependabot.** Workflows are intentionally manual-only.
-2. **Do not replace or substantially rewrite `YFinanceClient.swift` wholesale.** It contains a large, delicate repair engine. Prefer additive services/extensions and surgical changes with focused regression tests.
-3. **Do not blindly port Python implementation details.** Port behavior that is relevant to Swift/Yahoo semantics. Skip pandas, packaging, and Python-only machinery.
-4. **New reliability fixes need offline regression tests.** Yahoo/network tests are useful for smoke testing but are not a substitute for deterministic fixtures/mocks.
-5. **429 is not a normal retry.** Do not aggressively retry a Yahoo rate limit. Use the shared cooldown/request coordinator.
-6. **Never persist/reuse a crumb independently of its Yahoo cookie session.** Cookie and crumb state are coupled.
-7. **Do not log cookies, crumbs, Yahoo login cookies, authorization data, or unredacted sensitive query parameters.**
-8. **Malformed Yahoo data must fail safely.** Return structured errors, nil/empty best-effort values where appropriate, or integrity failures. Do not crash on null/missing/type-shifted fields.
-9. **Preserve the caller-visible quotation unit after repair.** GBp/ZAc/ILA repair may use major currency internally but must restore original units before returning data.
-10. **Keep `nommminal` pins deliberate.** Do not make the app float on `main`. Update its YFinanceKit revision only after a local Swift/Xcode verification pass.
+2. **Do not wholesale-rewrite `YFinanceClient.swift`.** It contains a large repair/compatibility engine. Prefer additive files and exact surgical migrations.
+3. **Do not blindly port Python implementation details.** Port Yahoo behavior relevant to Swift.
+4. **New reliability fixes need deterministic offline regression tests.**
+5. **429 is provider backpressure, not a normal retry.** Never stack aggressive retries around it.
+6. **Cookie + crumb state are coupled.** Never persist/reuse a crumb independently of its Yahoo cookie session.
+7. **Never log cookies, crumbs, auth values, sensitive headers, response bodies, or unredacted sensitive query parameters.**
+8. **Malformed Yahoo data must fail safely.** Null/missing/type-shifted data may yield structured errors or conservative best-effort output, never a crash.
+9. **Preserve caller-visible quotation units after repair.** GBp/ZAc/ILA may be repaired in major units internally, then must be restored.
+10. **Do not make `nommminal` float on `main`.** The app only advances to an exact locally verified YFinanceKit commit.
 
-## Architecture
+## Architecture direction
 
-### Stable facade
+`YFinanceClient` remains the broad compatibility facade. New app-facing code should prefer the smaller layers around it:
 
-`YFinanceClient` remains the compatibility/public facade for existing callers.
+- `YFinanceCrumbStore.swift`: Yahoo cookie/crumb strategies.
+- `YFinanceTransport.swift`: isolated URLSession transport boundary.
+- `YFRequestCoordinator`: global Yahoo concurrency, transient retry and cooldown.
+- `YFRequestBudgetGate`: interactive / normal / background logical priority.
+- `YFResilientClient`: single-flight, in-memory stale-while-revalidate, diagnostics.
+- `YFinanceResilienceProtocols.swift` and `YFinanceNativeServices.swift`: narrow feature-facing protocols/services.
+- `YFinanceHistoryIntegrity.swift` / `YFinanceHistoryHardening.swift`: structural audit and conservative repair.
+- `YFinanceFinancials.swift`: fundamentals-timeseries statements with chunk fallback.
+- `YFinanceErrorClassification.swift`: stable structured failure categories.
 
-### Session/auth
-
-- `YFinanceCrumbStore.swift`: Yahoo basic + CSRF/consent cookie strategies.
-- `YFinanceAuth.swift`: Yahoo login/subscription support.
-
-### Resilience layer
-
-Prefer `YFResilientClient` for high-volume app code.
-
-It provides:
-
-- bounded concurrency
-- single-flight request coalescing
-- exponential transient retry with jitter
-- shared stateful 429 cooldown
-- stale-while-revalidate quote/history caches
-- request/cache/coalescing diagnostics
-- injectable clock and jitter sources for deterministic tests
-
-Use `hardenedHistory(...)` / `hardenedHistoryCached(...)` when price repair is desired.
-
-### Data hardening
-
-- `YFinanceHistoryIntegrity.swift`: audit structural chart problems.
-- `YFinanceHistoryHardening.swift`: conservative bounded 100x block repair, OHLC normalization, exact custom-window event trimming, deterministic UTC/exchange date semantics.
-- `YFinanceFinancials.swift`: fundamentals-timeseries statements with reactive 60-key chunk fallback.
-- `YFinanceErrorClassification.swift`: structured failure categories.
-
-### Bulk access
-
-`YFTickers.infoResult(...)` uses bounded concurrency and isolates per-symbol failures. One bad symbol must not discard good results.
+Avoid growing the giant client when a focused facade/extension can carry the behavior.
 
 ## Upstream changes worth evaluating first
 
-When yfinance changes, prioritize:
+Prioritize cookie/crumb/session changes, rate limiting, chart/history semantics, price/dividend/split/currency repair, fundamentals-timeseries, quote/info null/schema handling, timezone/calendar behavior, options/search/screener changes.
 
-1. Yahoo cookie/crumb/session behavior
-2. rate-limit/network behavior
-3. chart/history semantics
-4. price/dividend/split/currency repair
-5. fundamentals-timeseries
-6. quote/info/schema null handling
-7. calendar/timezone semantics
-8. options/search/screener schema changes
+For open upstream PRs, port the regression case before borrowing implementation. Open PRs are evidence, not truth.
 
-Do not spend time porting Python packaging, pandas implementation choices, CI, or dependency churn unless they reveal a Yahoo behavior change.
+## Local pickup: remote hardening work is staged, not compile-verified
 
-For open upstream PRs, port the regression case before borrowing the implementation. An open PR is evidence, not truth.
+This is the important handoff point.
 
-## Testing
+The remote work intentionally stopped short of applying the large exact migrations inside `YFinanceClient.swift` / `YFinanceResilience.swift`, because those edits should be followed immediately by a real Swift compile/test loop. Do **not** interpret current `main` as the final verified app candidate merely because the source and migration tooling are present.
 
-From the repo root:
+Remote staging now includes:
+
+- isolated `YFURLSessionTransport` + tests
+- shared request coordinator, single-flight and SWR caches
+- foreground/background request budgeting
+- redacted diagnostics + per-endpoint rollups
+- `Retry-After` parsing and structured metadata
+- cross-market parity tooling
+- adversarial schema tests plus deterministic 96-seed Yahoo JSON mutation fuzzing
+- focused quote/history/metadata/financial service facades
+- exact migration scripts for the remaining giant-client changes
+- static source-state gates
+- warnings-as-errors complete-concurrency gate
+- small live-parity gate
+
+Static review also found two subtle coordinator races that are deliberately handled by the final local migration chain:
+
+1. a task cancelled while queued for the global Yahoo permit could otherwise resume later and still start provider work;
+2. a request could pass the cooldown check, queue for a permit, then start after another request opened a 429 cooldown unless cooldown is rechecked after permit acquisition.
+
+The final local chain also:
+
+- extracts direct URLSession request I/O out of `YFinanceClient`;
+- prevents a target-endpoint 429 from triggering cookie/crumb strategy refresh and a second Yahoo request;
+- parses HTTP `Retry-After` and makes the coordinator honor it as the cooldown floor.
+
+### Authoritative local YFinanceKit command
+
+From a local `YFinanceKit` checkout, run:
 
 ```bash
-bash tools/verify.sh
+python3 tools/prepare-hardening-candidate-final.py
 ```
 
-For the stricter concurrency audit:
+That command is the authoritative entry point. It applies, in order:
+
+1. `tools/apply-transport-extraction.py`
+2. `tools/apply-coordinator-cancellation-hardening.py`
+3. `tools/apply-post-permit-cooldown-recheck.py`
+4. `tools/apply-core-rate-limit-hardening.py`
+5. final static source-state verification
+6. `bash tools/verify.sh`
+7. `bash tools/strict-concurrency-audit.sh`
+
+Do not manually re-create those edits unless a migration fails because source drifted. If a script fails, inspect the source and update the surgical migration deliberately rather than doing a broad rewrite.
+
+After the command passes:
+
+1. Review the diff carefully, especially `YFinanceClient.swift` and `YFinanceResilience.swift`.
+2. Fix any real compiler/test/concurrency findings rather than weakening the gates.
+3. Commit the exact verified candidate locally.
+4. Record that commit SHA. That SHA, not a moving `main`, becomes the app candidate.
+5. Run the small live Yahoo gate:
 
 ```bash
-bash tools/strict-concurrency.sh
+bash tools/live-parity-gate.sh
 ```
 
-High-value offline suites include session/crumb, financial chunk fallback, error classification, history integrity, metadata fallback, repair parity, resilience coordination, single-flight/cache behavior, multi-info partial failure, and adversarial malformed-data cases.
+Use the broad matrix only deliberately if needed. Avoid hammering Yahoo just to manufacture confidence.
 
-## App integration
+### Then hand the exact verified SHA to nommminal
 
-`hackyhunter/nommminal` is the primary real consumer. Its native bridge has an established JSON contract. Preserve that contract unless the JS/native schema version is deliberately bumped on both sides.
+On `hackyhunter/nommminal`, use branch:
 
-The app should progressively move networking behavior into YFinanceKit rather than maintaining a second retry/rate-limit engine. App-only concerns such as presentation formatting, bridge payload shape, App Group persistence, widget timelines, and UI cancellation remain in `nommminal`.
+`yfinance-hardening-integration`
+
+Then run:
+
+```bash
+python3 scripts/prepare-yfinance-hardening.py --revision <verified-yfinancekit-commit>
+python3 scripts/verify-yfinance-hardening-all.py
+```
+
+Only after those pass should Xcode be opened for the final app gate.
+
+See `FINAL_HARDENING_FLOW.md` and `RELEASE_CHECKLIST.md` for the same flow in runbook form.
+
+## What still requires a real local/Xcode environment
+
+Do not claim these are done until they actually run:
+
+- final Swift compilation after the exact giant-client migrations
+- all offline tests after those migrations
+- warnings-as-errors complete strict-concurrency audit
+- live Yahoo parity/smoke on the committed candidate
+- `nommminal` ProviderParity + Node bridge/client tests against that exact candidate SHA
+- Xcode Debug simulator build
+- Xcode Release simulator build
+- simulator launch smoke
+- real cancellation / rapid-symbol-switch behavior
+- stale disk fallback after a successful fetch followed by network failure
+- 429 / Retry-After behavior end to end
+- chart 1d/5d/1mo + intraday behavior
+- revenue, earnings, options and background quote refresh
+- preferably one real-device Yahoo cookie/crumb/session smoke
+
+Do not tag a stable YFinanceKit release or advance `nommminal/master` before these gates pass.
