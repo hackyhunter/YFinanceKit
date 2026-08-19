@@ -1,109 +1,144 @@
 # YFinanceKit hardening
 
-This document tracks reliability work that intentionally goes beyond API-shape parity with Python yfinance.
+YFinanceKit is a native Swift Yahoo Finance implementation that tracks Python yfinance as a reverse-engineering oracle, but reliability takes precedence over mechanical Python parity.
 
-## Current baseline
+## Identity
 
-- Swift package implementation: `0.2.0-dev.3`
+- Swift implementation version: `0.2.0-dev.3`
 - yfinance compatibility target: `1.6.0`
-- upstream commit audited: `0af231f6a47eee5e773290830d228de0c20d5ee1` (2026-08-13)
+- upstream baseline: `0af231f6a47eee5e773290830d228de0c20d5ee1` (2026-08-13)
 
-The package implementation version and the Python compatibility target are intentionally independent.
+The Swift package version and the upstream compatibility version are intentionally independent.
 
 ## Architecture
 
-### Compatibility client behind focused façades
+### Compatibility monolith behind native façades
 
-`YFinanceClient` remains the broad Python-compatibility façade and still contains legacy endpoint/repair code. New high-volume app code should not grow that monolith further.
+`YFinanceClient` still contains a large amount of compatibility endpoint and price-repair behavior. New app code should not depend on the monolith directly.
 
-The preferred layers are:
+The native layering is:
 
-1. `YFinanceClient` for Yahoo transport/session compatibility
-2. `YFRequestCoordinator` for provider backpressure/retry/cooldown
-3. `YFResilientClient` for coalescing and in-memory stale caches
-4. narrow protocols and focused services for feature consumers
+1. `YFURLSessionTransport`
+   - isolated URLSession send/HTTP normalization layer
+   - Sendable response values: data, status, normalized headers
+2. `YFCrumbStore`
+   - Yahoo cookie/crumb strategy state
+3. `YFinanceClient`
+   - compatibility endpoints, parsing and legacy repair machinery
+4. `YFRequestCoordinator`
+   - global provider retry/backpressure policy
+5. `YFResilientClient`
+   - single-flight, cache and high-volume resilience façade
+6. focused native service protocols/façades
+   - quote
+   - history
+   - history metadata
+   - financial statements
+7. optional `YFRequestBudgetGate`
+   - interactive / normal / background logical scheduling
 
-Narrow protocols include quote, cached quote, history, cached history, metadata and financial-statement providers. `YFQuoteService`, `YFHistoryService`, `YFHistoryMetadataService` and `YFFinancialStatementService` keep app features from depending on the compatibility monolith directly. `YFMarketDataServices` bundles those services around one shared resilient client/session.
+The URLSession transport source is checked in now. Moving the giant client onto it is an exact local migration rather than a remote 174 KB whole-file replacement.
 
-This is the safe first half of splitting the giant client. Physically moving its private transport/session/repair internals remains a later local refactor with a real compiler/test loop.
+### Focused service surface
 
-## Network/session hardening
+Narrow protocols keep feature code from accidentally growing into another all-endpoint client:
 
-### Yahoo session state
+- `YFQuoteProviding`
+- `YFCachedQuoteProviding`
+- `YFHistoryProviding`
+- `YFCachedHistoryProviding`
+- `YFHistoryMetadataProviding`
+- `YFFinancialStatementProviding`
 
-Query1/query2 traffic uses a Yahoo cookie/crumb session. Crumbs are not resurrected from an unrelated persisted cookie session. The crumb store supports basic Yahoo cookie bootstrap and the CSRF/consent fallback strategy.
+Focused façades:
 
-Regression coverage includes blocked `fc.yahoo.com`, consent fallback, concurrent crumb callers and HTML/garbage crumb bodies.
+- `YFQuoteService`
+- `YFHistoryService`
+- `YFHistoryMetadataService`
+- `YFFinancialStatementService`
+- `YFMarketDataServices`
 
-### Rate limits and retries
+They can all share one `YFResilientClient`, so Yahoo cookie/crumb state remains unified.
 
-`YFRequestCoordinator` provides an app-facing request gate above `YFinanceClient`:
+## Yahoo session and request hardening
+
+### Cookie/crumb lifecycle
+
+Query1/query2 traffic uses paired Yahoo cookie/crumb state. Crumbs are not resurrected independently from an unrelated persisted cookie session.
+
+Supported bootstrap paths:
+
+- basic Yahoo cookie strategy
+- CSRF/consent fallback
+
+Regression coverage includes:
+
+- blocked `fc.yahoo.com`
+- consent fallback
+- concurrent crumb callers sharing one bootstrap
+- HTTP 200 HTML/garbage crumb bodies
+- rate-limit behavior
+
+### Retry policy
+
+`YFRequestCoordinator` owns provider-level retry policy above the compatibility client:
 
 - bounded concurrent Yahoo work
-- retry only for transport/5xx-style transient failures
-- exponential retry delay with jitter
+- retry transport/5xx-style transient failures only
+- exponential retry delay
+- jitter
 - no coordinator retry for 429
-- shared exponential cooldown after rate limits
+- shared rate-limit cooldown
 - cancellation checks
-- bounded request trace diagnostics
+- bounded traces/diagnostics
 
-`YFRetryAfterParser` understands both delta-seconds and HTTP-date `Retry-After` values. `YFinanceError.rateLimited(retryAfter:)` and `YFinanceError.retryAfter` carry that metadata without introducing a new enum case/source-breaking exhaustive switch.
+A 429 is provider backpressure, not evidence that the cookie/crumb strategy is invalid.
 
-The remaining giant-client core edit is checked in as an exact migration script:
+### Retry-After
 
-```bash
-python3 tools/apply-core-rate-limit-hardening.py
-```
+`YFRetryAfterParser` supports:
 
-It is intentionally not a blind whole-file rewrite. It performs only three surgical changes:
+- delta-seconds
+- RFC HTTP-date forms
+- bounded maximum delay
 
-- target-endpoint 429 bypasses cookie/crumb strategy refresh
-- `Retry-After` is parsed from the HTTP response
-- the coordinator uses provider `Retry-After` as the cooldown floor
+`YFinanceError.rateLimited(retryAfter:)` and `YFinanceError.retryAfter` carry provider backpressure metadata without adding a new enum case that would source-break exhaustive downstream switches.
 
-Run/review this migration locally before a release. Until that patch is applied to the large compatibility client, a target 429 can still cause one session-strategy refresh before reaching the outer coordinator.
+The final strict 429 behavior is applied locally as part of candidate preparation:
 
-### Logical request priority
+- target endpoint 429 bypasses crumb/session-strategy refresh
+- `Retry-After` is captured
+- the shared coordinator uses the provider delay as the cooldown floor
 
-`YFRequestBudgetGate` is an opt-in scheduler above the transport coordinator for apps that have both foreground and background work:
+### Logical priority budget
 
-- priorities: interactive, normal, background
-- interactive work queues ahead of normal/background work
+`YFRequestBudgetGate` adds optional app-level logical scheduling above the transport coordinator:
+
+- `interactive`
+- `normal`
+- `background`
+- foreground work queues ahead of lower-priority work
 - independent background concurrency cap
 - cancellation-safe queued waiters
-- diagnostic snapshot of active/queued work
+- active/queued diagnostics
 
-The transport coordinator remains the global Yahoo concurrency/backpressure authority. The priority gate only decides which logical caller gets to enter it next.
+This does not replace `YFRequestCoordinator`; it only decides which logical caller may enter that layer next.
 
-### Single-flight
+## Single-flight and caching
 
-`YFResilientClient` coalesces identical in-flight quote/history/metadata/financial/info operations. Callers waiting for the same work share one task instead of multiplying Yahoo requests.
+`YFResilientClient` coalesces identical in-flight work for high-value operations such as quote/history/metadata/financial/info retrieval.
 
-### Stale-while-revalidate
+`YFStaleCache` distinguishes:
 
-`YFStaleCache` and `quoteCached` / `historyCached` distinguish fresh, stale, and expired entries. Stale data can be returned immediately while a refresh happens separately, which is preferable to blank UI during temporary Yahoo failures.
+- fresh
+- stale
+- expired
 
-## Observability
-
-Diagnostics are intentionally operational, not payload logging.
-
-Available surfaces include:
-
-- logical requests and network attempts
-- retries and rate-limit count
-- success/failure/cancellation outcomes
-- cache hits/misses
-- coalesced request count
-- active/queued work and cooldown deadline
-- bounded per-request endpoint/resource traces
-- per-endpoint request count, attempts, average/max latency and failure-kind rollups
-- Codable redacted export for app/debug tooling
-
-The diagnostics export deliberately excludes URLs, query values, headers, cookies, crumbs, auth values, request bodies and response payloads.
+Quote/history cached APIs can return last-known-good stale data rather than forcing a blank UI during temporary Yahoo failures.
 
 ## History/data hardening
 
-### Structural integrity
+### Structural validation
 
 `YFHistorySeries.integrityReport()` detects:
 
@@ -111,130 +146,175 @@ The diagnostics export deliberately excludes URLs, query values, headers, cookie
 - non-monotonic timestamps
 - non-finite/non-positive prices
 - negative volume
-- invalid high/low bounds
+- high below low
 - open/close outside low/high
 - non-finite adjusted close
 - classic unexplained 100x/0.01x jumps
 
-Structural errors can be rejected with `validateIntegrity()`.
+`validateIntegrity()` rejects structural errors while leaving warning-level anomalies inspectable.
 
-### Conservative post-repair pass
+### Conservative 100x repair
 
-`YFinanceHistoryHardening.swift` adds behavior inspired by the upstream 1.6 repair work and open PR #2927:
+The post-repair hardener can detect a **bounded interior** 100x/0.01x block using paired transitions. It deliberately does not guess at a lone edge transition.
 
-- paired 100x/0.01x transitions can identify a bounded interior bad-unit block
-- only that interior block is scaled
-- a lone edge transition is deliberately left alone rather than guessed at
-- transitions near split events are excluded
-- invalid high/low bounds can be reconstructed from finite OHLC without changing open/close
-- start/end history corporate actions can be trimmed to the exact half-open requested window
+`YFResilientClient.safelyRepairedHistory(...)` protects against the upstream #2927 class of bug: if the legacy repair engine marks an unusually large slice of a table, raw history is compared and a simpler bounded repair only replaces the legacy result when the raw data proves the interior-block case.
 
-`YFResilientClient.safelyRepairedHistory(...)` adds a safety valve around the large legacy repair engine: when that engine marks a suspiciously large fraction of the table, raw history is compared and a bounded interior-unit repair only overrides the legacy output when the raw evidence supports it.
+### OHLC/date/event hardening
 
-### Date semantics
+- invalid high/low bounds can be normalized from finite OHLC values
+- custom start/end actions can be trimmed to the exact half-open requested window
+- Yahoo calendar epochs use explicit UTC semantics
+- exchange-day calculations use explicit exchange timezones instead of the machine timezone
 
-Yahoo calendar-event epochs are absolute UTC timestamps. `YFYahooDateSemantics.utcDateString(...)` makes that explicit. Exchange-day calculations use an explicit exchange timezone rather than the device local timezone.
-
-This incorporates the regression concerns from upstream open PRs #2947 and #2948 without copying their Python-specific implementation.
+These capture the regression concerns in upstream #2947/#2948 without importing their Python-specific implementation.
 
 ## Fundamentals
 
-Financial statements use Yahoo fundamentals-timeseries rather than relying solely on the old quoteSummary statement modules. The implementation:
+Financial statements use Yahoo fundamentals-timeseries with typed output.
 
-1. tries the single-request fast path
-2. detects empty/error/failing payloads
-3. falls back to 60-key chunks
-4. merges the results into typed statement series
-5. does not fan out into chunk fallback for auth/rate-limit failures that cannot be fixed by shorter URLs
+Behavior:
 
-## Error and schema handling
+1. single-request fast path
+2. detect empty/failing response
+3. 60-key fallback chunks for long URL/proxy failures
+4. merge into typed statement series
+5. do **not** fan out chunk requests after auth or rate-limit failures
 
-`YFinanceErrorClassifier` maps errors into stable categories including unauthorized, forbidden, not found, rate limited, server unavailable, transport, decoding, missing data, and Yahoo API failures.
+## Defensive schema handling
 
-Yahoo-provided explanations are preserved rather than inventing a delisting explanation when Yahoo already told us why data is missing.
+The package has deterministic malformed-response coverage for:
 
-JSON numeric access rejects non-finite foundation numbers and returns nil for unsafe integer conversions instead of risking a trapping numeric conversion.
+- null/empty chart results
+- HTML instead of JSON
+- truncated JSON
+- timestamp type shifts
+- numeric string type shifts
+- null quote arrays/results
+- null search collections
+- Yahoo error objects with explicit provider reasons
 
-The offline schema-mutation suite exercises null/empty chart results, HTML instead of JSON, truncated JSON, timestamp/number type shifts, null quote arrays, null quote results and null search collections. The contract is graceful typed failure or best-effort output, never a process crash.
+`YFinanceMutationFuzzTests` adds a deterministic 96-seed mutation corpus over a valid chart response. Mutations delete fields, insert nulls, shift types, truncate arrays and corrupt nested shapes. Each case must either return best-effort output or a structured `YFinanceError`, never an unrelated exception/process trap.
 
 ## Bulk access
 
-`YFTickers.infoResult(maxConcurrentRequests:)` provides bounded best-effort metadata fan-out. Each symbol has an independent success/failure result, so one malformed or unavailable ticker does not discard all successful data.
+`YFTickers.infoResult(maxConcurrentRequests:)` provides bounded best-effort multi-symbol metadata retrieval. One symbol failing does not discard successful siblings.
 
-## Parity and regression cage
+## Observability
 
-The default package contains deterministic coverage for:
+Diagnostics are operational, not payload logging.
 
-- Yahoo crumb/session handling and consent fallback
-- rate-limit classification/cooldown and Retry-After parsing
-- bounded concurrency and priority/background scheduling
-- queued cancellation
-- financial long-URL chunk fallback
-- history metadata fallback
-- history integrity
-- GBp/ZAc/ILA repair restoration
-- resilient retry/cooldown behavior
-- fresh/stale cache semantics
-- single-flight quote coalescing
-- bounded interior 100x block repair
-- suspicious-large-repair safety valve
-- exact custom-window event trimming
-- UTC/exchange date semantics
-- malformed/non-finite/schema-shifted JSON values
-- multi-info partial failure
-- redacted diagnostics and per-endpoint rollups
-- focused native service façades
+Available data includes:
 
-`tools/parity_matrix.py` drives the existing Python-vs-Swift parity harness across US equities/ETFs, intraday, London subunit quotes, Europe, Asia-Pacific, Johannesburg/Tel Aviv, crypto/FX and indices.
+- logical requests
+- network attempts
+- retries
+- rate limits
+- success/failure/cancellation
+- cache hits/misses
+- coalesced requests
+- active/queued requests
+- cooldown deadline
+- per-request duration/attempt count
+- per-endpoint average/max latency
+- per-endpoint failure-kind rollups
 
-Generated parity reports are evidence for the exact tested commit only. Stale generated reports should not remain checked in as permanent green badges.
+`YFDiagnosticsExport` is Codable and deliberately excludes:
+
+- full URLs/query values
+- headers
+- cookies
+- crumbs
+- auth values
+- request bodies
+- response bodies
+
+## Parity/regression matrix
+
+`tools/parity_matrix.py` drives the canonical parity harness across:
+
+- US equities
+- US ETFs/fund
+- US intraday
+- London subunit quotes
+- Europe
+- Asia-Pacific
+- Johannesburg/Tel Aviv
+- crypto/FX
+- indices
+
+Generated parity reports are evidence for the exact tested commit only. Old generated “green” reports must not remain checked in as permanent badges.
 
 ## nommminal integration
 
-The iOS app has a dedicated staging branch:
+The app has a dedicated staging branch:
 
 `yfinance-hardening-integration`
 
-That branch prepares:
+That branch stages:
 
 - one app-facing resilient market-data broker
-- foreground/background request priority policy
+- priority/background budgeting
 - additive bridge schema v2
-- JS bridge compatibility that preserves endpoint `data` keys
-- app-sandbox last-known-good snapshot policy/coordinator
-- real request-task cancellation with race-safe request reservations
-- deterministic local migration for the large `.pbxproj`, provider and JS policy edits
-- a pre-Xcode verification script
+- backward-compatible JS bridge metadata
+- real race-safe Swift task cancellation
+- quote/chart/revenue broker migration without changing endpoint data contracts
+- app-local last-known-good snapshot policy + fallback
+- deterministic `.pbxproj` source/pin edits
+- complete non-Xcode preparation + verification scripts
 
-`nommminal/master` remains on the last Xcode-verified package revision until those local gates pass.
+`nommminal/master` stays on the last Xcode-verified state until those gates pass.
 
-The current widget does not contact Yahoo. Sharing market snapshots with it remains optional and requires adding an App Group capability/signing configuration in Xcode.
+There is no App Group entitlement today. The current widget does not contact Yahoo, so app/widget market-data sharing is optional and remains an Xcode signing/capability choice.
 
-## Manual verification
+## Candidate preparation
 
-Automatic CI and Dependabot are intentionally disabled.
+Automatic CI and Dependabot remain disabled.
 
-Before a release candidate:
+In a **local YFinanceKit checkout**, the authoritative candidate flow is:
 
-```bash
-python3 tools/apply-core-rate-limit-hardening.py
-bash tools/verify.sh
-bash tools/strict-concurrency.sh
-python3 tools/parity_matrix.py
+```sh
+python3 tools/prepare-hardening-candidate.py
 ```
 
-The core migration must be reviewed as a narrow diff before committing/tagging.
+That command:
+
+1. applies `tools/apply-transport-extraction.py`
+2. applies `tools/apply-core-rate-limit-hardening.py`
+3. verifies the expected source state
+4. runs `tools/verify.sh`
+5. runs complete strict-concurrency checking
+
+`tools/verify.sh` itself performs:
+
+- Python migration/parity script syntax checks
+- `tools/verify-hardening-source-state.py`
+- Swift package manifest parse
+- `swift build`
+- `swift test`
+
+Review the giant-client diff before committing. Then commit the verified result and use that exact SHA in nommminal:
+
+```sh
+python3 scripts/prepare-yfinance-hardening.py --revision <verified-yfinancekit-commit>
+python3 scripts/verify-yfinance-hardening-all.py
+```
+
+Only after those non-Xcode gates pass should Xcode be opened for Debug/Release builds and runtime smoke.
 
 ## Remaining hard boundaries
 
-These require an actual local compiler/Xcode/device loop:
+These are not honestly solvable from the current remote-only environment:
 
-- execute and review the surgical core 429/Retry-After migration
-- run package build/tests and complete strict-concurrency checking
-- run the live cross-market parity matrix and a small Yahoo smoke
-- physically reorganize private transport/session/repair internals out of the compatibility monolith, if still desirable after the façade split
-- advance `nommminal` to the exact verified YFinanceKit revision
-- run its deterministic integration migration and pre-Xcode gate
-- Xcode Debug/Release simulator builds and launch smoke
+- execute/review the exact giant-client transport + strict-429 migrations
+- compile all Swift source and tests
+- complete strict-concurrency audit
+- run the live cross-market parity matrix
+- small live Yahoo smoke from a normal network
+- commit the verified final YFinanceKit candidate
+- run nommminal's deterministic integration migration against that final commit
+- Xcode Debug/Release simulator build
+- simulator launch/function smoke
 - real-device Yahoo/session/cancellation smoke
-- add App Group signing only if shared widget market snapshots are actually desired
+- signing/App Group work only if shared widget market snapshots are desired
+
+Until those happen, this source tree is a hardened **pre-release candidate staging state**, not a claimed production-verified release.
