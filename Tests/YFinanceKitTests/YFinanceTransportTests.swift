@@ -14,8 +14,10 @@ final class YFinanceTransportTests: XCTestCase {
     }
 
     func testTransportReturnsSendableStatusHeadersAndData() async throws {
-        TransportURLProtocol.handler = { request in
-            let url = try XCTUnwrap(request.url)
+        TransportURLProtocol.setHandler { request in
+            guard let url = request.url else {
+                throw TransportTestError.missingURL
+            }
             let response = HTTPURLResponse(
                 url: url,
                 statusCode: 429,
@@ -40,7 +42,7 @@ final class YFinanceTransportTests: XCTestCase {
     }
 
     func testTransportRejectsNonHTTPResponse() async throws {
-        TransportURLProtocol.nonHTTP = true
+        TransportURLProtocol.setNonHTTP(true)
         let transport = YFURLSessionTransport(session: makeSession())
         let request = URLRequest(url: URL(string: "https://query1.finance.yahoo.com/test")!)
 
@@ -63,24 +65,63 @@ final class YFinanceTransportTests: XCTestCase {
 
 private enum TransportTestError: Error {
     case missingHandler
+    case missingURL
+}
+
+private final class TransportURLProtocolState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private var nonHTTP = false
+
+    func reset() {
+        lock.lock()
+        handler = nil
+        nonHTTP = false
+        lock.unlock()
+    }
+
+    func setHandler(_ value: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)) {
+        lock.lock()
+        handler = value
+        lock.unlock()
+    }
+
+    func setNonHTTP(_ value: Bool) {
+        lock.lock()
+        nonHTTP = value
+        lock.unlock()
+    }
+
+    func snapshot() -> (handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?, nonHTTP: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (handler, nonHTTP)
+    }
 }
 
 private final class TransportURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
-    static var nonHTTP = false
+    private static let state = TransportURLProtocolState()
 
     static func reset() {
-        handler = nil
-        nonHTTP = false
+        state.reset()
+    }
+
+    static func setHandler(_ handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)) {
+        state.setHandler(handler)
+    }
+
+    static func setNonHTTP(_ value: Bool) {
+        state.setNonHTTP(value)
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        if Self.nonHTTP {
+        let snapshot = Self.state.snapshot()
+        if snapshot.nonHTTP {
             guard let url = request.url else {
-                client?.urlProtocol(self, didFailWithError: TransportTestError.missingHandler)
+                client?.urlProtocol(self, didFailWithError: TransportTestError.missingURL)
                 return
             }
             let response = URLResponse(
@@ -94,7 +135,7 @@ private final class TransportURLProtocol: URLProtocol {
             return
         }
 
-        guard let handler = Self.handler else {
+        guard let handler = snapshot.handler else {
             client?.urlProtocol(self, didFailWithError: TransportTestError.missingHandler)
             return
         }
