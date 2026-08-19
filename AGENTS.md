@@ -45,9 +45,23 @@ Prioritize cookie/crumb/session changes, rate limiting, chart/history semantics,
 
 For open upstream PRs, port the regression case before borrowing implementation. Open PRs are evidence, not truth.
 
+## August 19 2026 pickup: lazy history metadata
+
+Branch `port/lazy-history-metadata` is cut from the current hardening `main` and ports the behavior of upstream yfinance PR #2922 without changing Xcode/app package state.
+
+Important implementation details:
+
+- `YFinanceHistoryMetadata.swift` records a short-lived core metadata snapshot when typed chart/history metadata decodes.
+- Existing `YFTicker.historyMetadata()` is intentionally left byte-for-byte unchanged. A new exact four-argument `YFinanceClient.historyRaw(...)` overload is preferred by Swift over the older overload with defaulted trailing arguments, redirecting that one metadata call to the lazy core-metadata path without rewriting the large ticker source file.
+- Explicit `tradingPeriods` enrichment remains available through `robustHistoryMetadata(symbol:includeTradingPeriods:timeout:)` and `YF.historyMetadata(_:includeTradingPeriods:timeout:client:)`.
+- The `5d/1h` enrichment is best-effort, cached after success, and must not invalidate otherwise-valid core metadata when it fails.
+- `YFinanceHistoryMetadataTests.swift` includes offline request-count coverage for history-to-metadata reuse, explicit hourly enrichment, repeat enrichment caching, and non-fatal intraday failure.
+- Automatic GitHub Actions remain manual-only. Do not add push/PR triggers for this branch.
+- Before app pinning or release work, run the normal local Swift verification and the app/Xcode gate against the exact verified commit.
+
 ## Local pickup: remote hardening work is staged, not compile-verified
 
-This is the important handoff point.
+This section documents the earlier hardening handoff. Treat the August 19 lazy-metadata note above as the branch-specific pickup point and do not undo newer local/Xcode-verified work merely to reproduce the historical staging sequence.
 
 The remote work intentionally stopped short of applying the large exact migrations inside `YFinanceClient.swift` / `YFinanceResilience.swift`, because those edits should be followed immediately by a real Swift compile/test loop. Do **not** interpret current `main` as the final verified app candidate merely because the source and migration tooling are present.
 
