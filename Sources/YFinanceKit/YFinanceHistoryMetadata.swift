@@ -206,6 +206,37 @@ private func yfMetadataHasTradingPeriods(_ metadata: YFJSONValue) -> Bool {
     }
 }
 
+extension YFinanceClient {
+    /// Internal compatibility hook for the existing ticker metadata accessor.
+    /// The exact four-argument overload is visible only inside YFinanceKit, so
+    /// external callers keep the original public raw-history behavior.
+    func historyRaw(
+        symbol: String,
+        range: Range,
+        interval: Interval,
+        includePrePost: Bool
+    ) async throws -> YFJSONValue {
+        if range == .fiveDays, interval == .oneHour, includePrePost {
+            let metadata = try await robustHistoryMetadata(symbol: symbol).metadata
+            return .object([
+                "chart": .object([
+                    "result": .array([.object(["meta": metadata])]),
+                    "error": .null,
+                ]),
+            ])
+        }
+
+        return try await historyRaw(
+            symbol: symbol,
+            range: range,
+            interval: interval,
+            includePrePost: includePrePost,
+            events: [.dividends, .splits],
+            timeout: nil
+        )
+    }
+}
+
 public extension YFinanceClient {
     /// Returns core history metadata without paying for intraday enrichment.
     /// A recent typed chart/history response for this symbol is reused when
