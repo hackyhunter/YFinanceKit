@@ -161,8 +161,15 @@ public actor YFRequestCoordinator {
     private let clock: any YFClock
     private let jitter: any YFJitterSource
 
+    private struct PermitWaiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
     private var activeRequests = 0
-    private var permitWaiters: [CheckedContinuation<Void, Never>] = []
+    private var permitWaiters: [PermitWaiter] = []
+    private var preparingPermitWaiterIDs: Set<UUID> = []
+    private var cancelledBeforePermitEnqueue: Set<UUID> = []
     private var cooldownUntil: Date?
     private var rateLimitStreak = 0
 
@@ -215,12 +222,33 @@ public actor YFRequestCoordinator {
                 throw error
             }
 
-            try await waitForCooldown()
-            await acquirePermit()
+            do {
+                try await waitForCooldown()
+                try await acquirePermit()
+            } catch is CancellationError {
+                let endedAt = await clock.now()
+                appendTrace(
+                    YFRequestTrace(
+                        endpoint: endpoint,
+                        resource: resource,
+                        startedAt: requestStartedAt,
+                        duration: endedAt.timeIntervalSince(requestStartedAt),
+                        attempts: attempt,
+                        outcome: .cancelled,
+                        failureKind: nil
+                    )
+                )
+                throw CancellationError()
+            }
+
             attempts += 1
             attempt += 1
 
             do {
+                // Cooldown may have opened while this request was queued for a
+                // global permit. Recheck before the provider operation starts.
+                try await waitForCooldown()
+                try Task.checkCancellation()
                 let value = try await operation()
                 releasePermit()
                 successes += 1
@@ -237,6 +265,21 @@ public actor YFRequestCoordinator {
                     )
                 )
                 return value
+            } catch is CancellationError {
+                releasePermit()
+                let endedAt = await clock.now()
+                appendTrace(
+                    YFRequestTrace(
+                        endpoint: endpoint,
+                        resource: resource,
+                        startedAt: requestStartedAt,
+                        duration: endedAt.timeIntervalSince(requestStartedAt),
+                        attempts: attempt,
+                        outcome: .cancelled,
+                        failureKind: nil
+                    )
+                )
+                throw CancellationError()
             } catch {
                 releasePermit()
                 let kind = YFinanceErrorClassifier.kind(of: error)
@@ -245,7 +288,17 @@ public actor YFRequestCoordinator {
                     rateLimits += 1
                     failures += 1
                     rateLimitStreak += 1
-                    await openRateLimitCooldown()
+                    if let retryAfter = (error as? YFinanceError)?.retryAfter, retryAfter > 0 {
+                        let now = await clock.now()
+                        let proposed = now.addingTimeInterval(
+                            min(retryAfter, policy.maxRateLimitCooldown)
+                        )
+                        if cooldownUntil == nil || proposed > cooldownUntil! {
+                            cooldownUntil = proposed
+                        }
+                    } else {
+                        await openRateLimitCooldown()
+                    }
                     let endedAt = await clock.now()
                     appendTrace(
                         YFRequestTrace(
@@ -289,9 +342,9 @@ public actor YFRequestCoordinator {
         }
     }
 
-    /// Allows a transport that can see `Retry-After` to feed a stronger cooldown
-    /// signal into the shared gate. Current `YFinanceClient` does not expose response
-    /// headers, so resilient wrappers otherwise use exponential cooldowns.
+    /// Allows callers/transports to feed an explicit `Retry-After` signal into
+    /// the shared gate. Core HTTP 429 errors also carry this metadata when the
+    /// provider sends the header.
     public func noteRateLimit(retryAfter: TimeInterval? = nil) async {
         rateLimits += 1
         rateLimitStreak += 1
@@ -335,27 +388,56 @@ public actor YFRequestCoordinator {
             cacheHits: cacheHits,
             cacheMisses: cacheMisses,
             activeRequests: activeRequests,
-            queuedRequests: permitWaiters.count,
+            queuedRequests: permitWaiters.count + preparingPermitWaiterIDs.count,
             cooldownUntil: cooldownUntil,
             recentTraces: recentTraces
         )
     }
 
-    private func acquirePermit() async {
+    private func acquirePermit() async throws {
+        try Task.checkCancellation()
         if activeRequests < policy.maxConcurrentRequests {
             activeRequests += 1
             return
         }
 
-        await withCheckedContinuation { continuation in
-            permitWaiters.append(continuation)
+        let id = UUID()
+        preparingPermitWaiterIDs.insert(id)
+        let _: Void = try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation {
+                    (continuation: CheckedContinuation<Void, Error>) in
+                    preparingPermitWaiterIDs.remove(id)
+                    if cancelledBeforePermitEnqueue.remove(id) != nil || Task.isCancelled {
+                        continuation.resume(throwing: CancellationError())
+                        return
+                    }
+                    permitWaiters.append(
+                        PermitWaiter(id: id, continuation: continuation)
+                    )
+                }
+            },
+            onCancel: {
+                Task { await self.cancelPermitWaiter(id: id) }
+            }
+        )
+    }
+
+    private func cancelPermitWaiter(id: UUID) {
+        if let index = permitWaiters.firstIndex(where: { $0.id == id }) {
+            let waiter = permitWaiters.remove(at: index)
+            waiter.continuation.resume(throwing: CancellationError())
+            return
+        }
+        if preparingPermitWaiterIDs.contains(id) {
+            cancelledBeforePermitEnqueue.insert(id)
         }
     }
 
     private func releasePermit() {
-        if !permitWaiters.isEmpty {
+        while !permitWaiters.isEmpty {
             let waiter = permitWaiters.removeFirst()
-            waiter.resume()
+            waiter.continuation.resume()
             return
         }
         activeRequests = max(0, activeRequests - 1)

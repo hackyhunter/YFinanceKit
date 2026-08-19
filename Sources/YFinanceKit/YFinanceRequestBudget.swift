@@ -99,9 +99,10 @@ public actor YFRequestBudgetGate {
         }
 
         let id = UUID()
-        try await withTaskCancellationHandler(
+        let _: Void = try await withTaskCancellationHandler(
             operation: {
-                try await withCheckedThrowingContinuation { continuation in
+                try await withCheckedThrowingContinuation {
+                    (continuation: CheckedContinuation<Void, Error>) in
                     if cancelledBeforeEnqueue.remove(id) != nil || Task.isCancelled {
                         continuation.resume(throwing: CancellationError())
                         return

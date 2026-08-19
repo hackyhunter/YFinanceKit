@@ -116,27 +116,24 @@ private enum ResilientTestError: Error {
 }
 
 private final class ResilientURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private static let handlerState = TestURLProtocolHandlerState()
+    private static let quoteRequestCounter = TestURLProtocolCounterState()
 
-    private static let lock = NSLock()
-    private static var _quoteRequestCount = 0
+    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { handlerState.snapshot() }
+        set { handlerState.set(newValue) }
+    }
 
     static var quoteRequestCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return _quoteRequestCount
+        quoteRequestCounter.snapshot()
     }
 
     static func incrementQuoteCount() {
-        lock.lock()
-        _quoteRequestCount += 1
-        lock.unlock()
+        quoteRequestCounter.increment()
     }
 
     static func reset() {
-        lock.lock()
-        _quoteRequestCount = 0
-        lock.unlock()
+        quoteRequestCounter.reset()
         handler = nil
     }
 

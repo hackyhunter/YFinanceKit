@@ -10,6 +10,11 @@ actor YFCrumbStore {
         }
     }
 
+    private struct CrumbFlight {
+        let id: UUID
+        let task: Task<String, Error>
+    }
+
     private let session: URLSession
     private let userAgent: String
     private let crumbTTL: TimeInterval = 60 * 60 * 6
@@ -19,6 +24,7 @@ actor YFCrumbStore {
     private var fetchedAt: Date?
     private var cookieStrategy: CookieStrategy = .basic
     private var clearedLegacyCache = false
+    private var crumbFlight: CrumbFlight?
 
     init(session: URLSession, userAgent: String) {
         self.session = session
@@ -31,11 +37,36 @@ actor YFCrumbStore {
         if forceRefresh {
             crumb = nil
             fetchedAt = nil
+            crumbFlight?.task.cancel()
+            crumbFlight = nil
         } else if let crumb,
                   let fetchedAt,
                   Date().timeIntervalSince(fetchedAt) < crumbTTL {
             return crumb
         }
+
+        if let crumbFlight {
+            return try await crumbFlight.task.value
+        }
+
+        let flightID = UUID()
+        let task = Task<String, Error> {
+            try await self.fetchFreshCrumb()
+        }
+        crumbFlight = CrumbFlight(id: flightID, task: task)
+
+        do {
+            let value = try await task.value
+            clearCrumbFlight(id: flightID)
+            return value
+        } catch {
+            clearCrumbFlight(id: flightID)
+            throw error
+        }
+    }
+
+    private func fetchFreshCrumb() async throws -> String {
+        try Task.checkCancellation()
 
         // Match modern yfinance's behavior: try the active Yahoo cookie strategy,
         // then fall back to the alternate strategy if Yahoo rejects it.
@@ -45,6 +76,7 @@ actor YFCrumbStore {
         for strategy in strategies {
             do {
                 if let freshCrumb = try await fetchCrumb(using: strategy) {
+                    try Task.checkCancellation()
                     cookieStrategy = strategy
                     crumb = freshCrumb
                     fetchedAt = Date()
@@ -65,7 +97,14 @@ actor YFCrumbStore {
         throw YFinanceError.missingData("Could not fetch Yahoo crumb")
     }
 
+    private func clearCrumbFlight(id: UUID) {
+        guard crumbFlight?.id == id else { return }
+        crumbFlight = nil
+    }
+
     func invalidate() async {
+        crumbFlight?.task.cancel()
+        crumbFlight = nil
         crumb = nil
         fetchedAt = nil
         cookieStrategy = cookieStrategy.alternate

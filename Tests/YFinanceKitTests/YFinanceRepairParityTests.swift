@@ -93,7 +93,12 @@ private enum RepairTestError: Error {
 }
 
 private final class RepairYahooURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private static let handlerState = TestURLProtocolHandlerState()
+
+    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { handlerState.snapshot() }
+        set { handlerState.set(newValue) }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

@@ -128,27 +128,24 @@ private enum CrumbHardeningError: Error {
 }
 
 private final class CrumbHardeningURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private static let handlerState = TestURLProtocolHandlerState()
+    private static let crumbFetchCounter = TestURLProtocolCounterState()
 
-    private static let lock = NSLock()
-    private static var _crumbFetchCount = 0
+    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { handlerState.snapshot() }
+        set { handlerState.set(newValue) }
+    }
 
     static var crumbFetchCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return _crumbFetchCount
+        crumbFetchCounter.snapshot()
     }
 
     static func incrementCrumbFetchCount() {
-        lock.lock()
-        _crumbFetchCount += 1
-        lock.unlock()
+        crumbFetchCounter.increment()
     }
 
     static func reset() {
-        lock.lock()
-        _crumbFetchCount = 0
-        lock.unlock()
+        crumbFetchCounter.reset()
         handler = nil
     }
 

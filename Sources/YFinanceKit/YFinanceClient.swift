@@ -112,6 +112,7 @@ public actor YFinanceClient {
     }
 
     private let session: URLSession
+    private let transport: any YFHTTPTransporting
     private let decoder: JSONDecoder
     private let userAgent: String
     private let query1BaseURL: URL
@@ -134,6 +135,7 @@ public actor YFinanceClient {
         rootBaseURL: URL = URL(string: "https://finance.yahoo.com")!
     ) {
         self.session = session
+        self.transport = YFURLSessionTransport(session: session)
         self.userAgent = userAgent
         self.query1BaseURL = query1BaseURL
         self.query2BaseURL = query2BaseURL
@@ -830,6 +832,13 @@ public actor YFinanceClient {
                 timeout: effectiveTimeout
             )
         } catch {
+            // A target-endpoint 429 is provider backpressure, not evidence that
+            // the Yahoo cookie/crumb strategy is invalid. Do not generate a
+            // second request by switching/refreshing the session.
+            if YFinanceErrorClassifier.kind(of: error) == .rateLimited {
+                throw error
+            }
+
             guard shouldUseCrumb else {
                 throw error
             }
@@ -887,15 +896,16 @@ public actor YFinanceClient {
 
         while attempt <= retries {
             do {
-                let (data, response) = try await session.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw YFinanceError.missingData("Expected HTTPURLResponse")
-                }
+                let response = try await transport.send(request)
                 if debugEnabled {
-                    print("[YFinanceKit] \(method) \(redactedURLString(url)) -> \(httpResponse.statusCode) (\(data.count) bytes)")
+                    print("[YFinanceKit] \(method) \(redactedURLString(url)) -> \(response.statusCode) (\(response.data.count) bytes)")
                 }
-                try validateResponse(data: data, response: httpResponse)
-                return data
+                try validateResponse(
+                    data: response.data,
+                    statusCode: response.statusCode,
+                    retryAfterHeader: response.header("Retry-After")
+                )
+                return response.data
             } catch {
                 lastError = error
                 let mappedError = mapTransport(error)
@@ -945,15 +955,16 @@ public actor YFinanceClient {
 
         while attempt <= retries {
             do {
-                let (data, response) = try await session.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    throw YFinanceError.missingData("Expected HTTPURLResponse")
-                }
+                let response = try await transport.send(request)
                 if debugEnabled {
-                    print("[YFinanceKit] \(method) \(redactedURLString(url)) -> \(httpResponse.statusCode) (\(data.count) bytes)")
+                    print("[YFinanceKit] \(method) \(redactedURLString(url)) -> \(response.statusCode) (\(response.data.count) bytes)")
                 }
-                try validateResponse(data: data, response: httpResponse)
-                return data
+                try validateResponse(
+                    data: response.data,
+                    statusCode: response.statusCode,
+                    retryAfterHeader: response.header("Retry-After")
+                )
+                return response.data
             } catch {
                 lastError = error
                 let mappedError = mapTransport(error)
@@ -968,11 +979,15 @@ public actor YFinanceClient {
         throw (lastError.map { mapTransport($0) } ?? YFinanceError.missingData("Unknown network error"))
     }
 
-    private func validateResponse(data: Data, response: HTTPURLResponse) throws {
-        // Keep rate limits distinct so callers do not mistake a Yahoo edge
-        // throttle for a malformed finance payload.
-        if response.statusCode == 429 {
-            throw YFinanceError.httpStatus(429)
+    private func validateResponse(
+        data: Data,
+        statusCode: Int,
+        retryAfterHeader: String?
+    ) throws {
+        // Keep provider backpressure distinct from auth/session failures.
+        if statusCode == 429 {
+            let retryAfter = YFRetryAfterParser.parse(retryAfterHeader)
+            throw YFinanceError.rateLimited(retryAfter: retryAfter)
         }
 
         if let envelope = try? decoder.decode(YFFinanceErrorEnvelope.self, from: data),
@@ -983,8 +998,8 @@ public actor YFinanceClient {
             )
         }
 
-        guard (200...299).contains(response.statusCode) else {
-            throw YFinanceError.httpStatus(response.statusCode)
+        guard (200...299).contains(statusCode) else {
+            throw YFinanceError.httpStatus(statusCode)
         }
     }
 
@@ -3137,9 +3152,13 @@ public actor YFinanceClient {
         for col in 0..<columnCount {
             for i in 1..<n {
                 let accessor = priceAccessors[col]
-                guard let current = accessor(descBars[i]).map({ $0 * priceScaleFactor(at: i) }),
-                      let previous = accessor(descBars[i - 1]).map({ $0 * priceScaleFactor(at: i - 1) }),
-                      previous > 0,
+                guard let currentPrice = accessor(descBars[i]),
+                      let previousPrice = accessor(descBars[i - 1]) else {
+                    continue
+                }
+                let current = currentPrice * priceScaleFactor(at: i)
+                let previous = previousPrice * priceScaleFactor(at: i - 1)
+                guard previous > 0,
                       current > 0 else {
                     continue
                 }

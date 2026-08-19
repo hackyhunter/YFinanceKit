@@ -186,7 +186,12 @@ final class YFinanceSessionTests: XCTestCase {
 }
 
 private final class MockYahooURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    private static let handlerState = TestURLProtocolHandlerState()
+
+    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        get { handlerState.snapshot() }
+        set { handlerState.set(newValue) }
+    }
 
     static func reset() {
         handler = nil
