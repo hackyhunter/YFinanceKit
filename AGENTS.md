@@ -52,12 +52,12 @@ Branch `port/lazy-history-metadata` is cut from the current hardening `main` and
 Important implementation details:
 
 - `YFinanceHistoryMetadata.swift` records a short-lived core metadata snapshot when typed chart/history metadata decodes.
-- Existing `YFTicker.historyMetadata()` is intentionally left byte-for-byte unchanged. A new exact four-argument `YFinanceClient.historyRaw(...)` overload is preferred by Swift over the older overload with defaulted trailing arguments, redirecting that one metadata call to the lazy core-metadata path without rewriting the large ticker source file.
+- Existing `YFTicker.historyMetadata()` remains byte-for-byte unchanged. A module-internal exact four-argument `YFinanceClient.historyRaw(...)` overload is preferred only for the existing in-module ticker metadata call; external callers cannot see that overload and continue to use the original public raw-history API unchanged.
 - Explicit `tradingPeriods` enrichment remains available through `robustHistoryMetadata(symbol:includeTradingPeriods:timeout:)` and `YF.historyMetadata(_:includeTradingPeriods:timeout:client:)`.
 - The `5d/1h` enrichment is best-effort, cached after success, and must not invalidate otherwise-valid core metadata when it fails.
 - `YFinanceHistoryMetadataTests.swift` includes offline request-count coverage for history-to-metadata reuse, explicit hourly enrichment, repeat enrichment caching, and non-fatal intraday failure.
 - Automatic GitHub Actions remain manual-only. Do not add push/PR triggers for this branch.
-- Before app pinning or release work, run the normal local Swift verification and the app/Xcode gate against the exact verified commit.
+- `nommminal` and all Xcode/SwiftPM app pins remain untouched by this branch. Advance only to an exact commit after the normal local Swift and app/Xcode gates pass.
 
 ## Local pickup: remote hardening work is staged, not compile-verified
 
