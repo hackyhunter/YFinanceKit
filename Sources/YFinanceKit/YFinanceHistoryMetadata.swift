@@ -21,6 +21,134 @@ public struct YFHistoryMetadataResult: Sendable {
     }
 }
 
+final class YFDecodedHistoryMetadataStore: @unchecked Sendable {
+    static let shared = YFDecodedHistoryMetadataStore()
+
+    private struct Entry {
+        let snapshot: YFStoredHistoryMetadata
+        let recordedAt: Date
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+    private let ttl: TimeInterval = 5 * 60
+
+    private init() {}
+
+    func record(_ meta: YFHistoryMeta) {
+        guard let symbol = Self.cleanSymbol(meta.symbol) else { return }
+
+        var object: [String: YFJSONValue] = [:]
+        Self.set(meta.currency, key: "currency", in: &object)
+        Self.set(meta.symbol, key: "symbol", in: &object)
+        Self.set(meta.exchangeName, key: "exchangeName", in: &object)
+        Self.set(meta.instrumentType, key: "instrumentType", in: &object)
+        Self.set(meta.timezone, key: "timezone", in: &object)
+        Self.set(meta.exchangeTimezoneName, key: "exchangeTimezoneName", in: &object)
+        Self.set(meta.regularMarketPrice, key: "regularMarketPrice", in: &object)
+        Self.set(meta.chartPreviousClose, key: "chartPreviousClose", in: &object)
+        Self.set(meta.previousClose, key: "previousClose", in: &object)
+        Self.set(meta.gmtoffset, key: "gmtoffset", in: &object)
+        Self.set(meta.dataGranularity, key: "dataGranularity", in: &object)
+        Self.set(meta.priceHint, key: "priceHint", in: &object)
+        Self.set(meta.range, key: "range", in: &object)
+
+        if let validRanges = meta.validRanges {
+            object["validRanges"] = .array(validRanges.map { .string($0) })
+        }
+        if let lastTrade = meta.lastTrade {
+            var value: [String: YFJSONValue] = [:]
+            Self.set(lastTrade.price, key: "price", in: &value)
+            Self.set(lastTrade.time, key: "time", in: &value)
+            object["lastTrade"] = .object(value)
+        }
+
+        let interval = meta.dataGranularity
+            .flatMap { YFinanceClient.Interval(pythonValue: $0) }
+            ?? .oneDay
+        record(
+            metadata: .object(object),
+            intervalUsed: interval,
+            symbol: symbol
+        )
+    }
+
+    @discardableResult
+    func record(
+        metadata: YFJSONValue,
+        intervalUsed: YFinanceClient.Interval,
+        symbol: String
+    ) -> YFStoredHistoryMetadata {
+        let cleaned = Self.cleanSymbol(symbol) ?? symbol
+        var storedMetadata = metadata
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        if var object = metadata.objectValue,
+           object["tradingPeriods"] == nil,
+           let cachedTradingPeriods = entries[cleaned]?.snapshot
+               .metadata["tradingPeriods"] {
+            object["tradingPeriods"] = cachedTradingPeriods
+            storedMetadata = .object(object)
+        }
+
+        let snapshot = YFStoredHistoryMetadata(
+            metadata: storedMetadata,
+            intervalUsed: intervalUsed
+        )
+        entries[cleaned] = Entry(snapshot: snapshot, recordedAt: Date())
+        return snapshot
+    }
+
+    func lookup(_ symbol: String) -> YFStoredHistoryMetadata? {
+        guard let cleaned = Self.cleanSymbol(symbol) else { return nil }
+        let now = Date()
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let entry = entries[cleaned] else { return nil }
+        guard now.timeIntervalSince(entry.recordedAt) <= ttl else {
+            entries.removeValue(forKey: cleaned)
+            return nil
+        }
+        return entry.snapshot
+    }
+
+    private static func cleanSymbol(_ symbol: String?) -> String? {
+        guard let symbol else { return nil }
+        let cleaned = symbol
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private static func set(
+        _ value: String?,
+        key: String,
+        in object: inout [String: YFJSONValue]
+    ) {
+        if let value { object[key] = .string(value) }
+    }
+
+    private static func set(
+        _ value: Double?,
+        key: String,
+        in object: inout [String: YFJSONValue]
+    ) {
+        if let value, value.isFinite { object[key] = .number(value) }
+    }
+
+    private static func set(
+        _ value: Int?,
+        key: String,
+        in object: inout [String: YFJSONValue]
+    ) {
+        if let value { object[key] = .number(Double(value)) }
+    }
+}
+
 private func yfMetadataHasTradingPeriods(_ metadata: YFJSONValue) -> Bool {
     guard let tradingPeriods = metadata["tradingPeriods"] else { return false }
     switch tradingPeriods {
@@ -35,53 +163,11 @@ private func yfMetadataHasTradingPeriods(_ metadata: YFJSONValue) -> Bool {
     }
 }
 
-extension YFinanceClient {
-    /// Records the exact raw Yahoo metadata from a successful typed chart
-    /// response without issuing another request.
-    func recordHistoryMetadataSnapshotIfPresent(
-        data: Data,
-        path: String,
-        queryItems: [URLQueryItem]
-    ) {
-        let prefix = "/v8/finance/chart/"
-        guard path.hasPrefix(prefix) else { return }
-
-        let rawSymbol = String(path.dropFirst(prefix.count))
-        let symbol = (rawSymbol.removingPercentEncoding ?? rawSymbol)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        guard !symbol.isEmpty,
-              let raw = try? YFJSONValue.decode(data: data),
-              let incomingMetadata = raw["chart"]?["result"]?[0]?["meta"],
-              var incomingObject = incomingMetadata.objectValue else {
-            return
-        }
-
-        // Keep a previously enriched trading-period payload when a later normal
-        // history request refreshes the core metadata without that optional key.
-        if incomingObject["tradingPeriods"] == nil,
-           let cachedTradingPeriods = historyMetadataSnapshots[symbol]?
-               .metadata["tradingPeriods"] {
-            incomingObject["tradingPeriods"] = cachedTradingPeriods
-        }
-
-        let interval = queryItems
-            .first(where: { $0.name == "interval" })?
-            .value
-            .flatMap { YFinanceClient.Interval(pythonValue: $0) }
-            ?? .oneDay
-
-        historyMetadataSnapshots[symbol] = YFStoredHistoryMetadata(
-            metadata: .object(incomingObject),
-            intervalUsed: interval
-        )
-    }
-}
-
 public extension YFinanceClient {
     /// Returns core history metadata without paying for intraday enrichment.
-    /// If a normal chart request already ran on this client, its Yahoo `meta`
-    /// object is reused and this method performs no chart request.
+    /// A recent typed chart/history response for this symbol is reused when
+    /// available, so `history()` followed by metadata access needs no chart
+    /// request solely for metadata.
     func robustHistoryMetadata(
         symbol: String,
         timeout: TimeInterval? = 10
@@ -108,7 +194,7 @@ public extension YFinanceClient {
             throw YFinanceError.invalidRequest("symbol cannot be empty")
         }
 
-        if let cached = historyMetadataSnapshots[symbol] {
+        if let cached = YFDecodedHistoryMetadataStore.shared.lookup(symbol) {
             return await historyMetadataResult(
                 symbol: symbol,
                 base: cached,
@@ -138,11 +224,11 @@ public extension YFinanceClient {
             )
         }
 
-        let base = YFStoredHistoryMetadata(
+        let base = YFDecodedHistoryMetadataStore.shared.record(
             metadata: metadata,
-            intervalUsed: .oneDay
+            intervalUsed: .oneDay,
+            symbol: symbol
         )
-        historyMetadataSnapshots[symbol] = base
 
         return await historyMetadataResult(
             symbol: symbol,
@@ -197,11 +283,11 @@ public extension YFinanceClient {
                 )
             }
 
-            let enriched = YFStoredHistoryMetadata(
+            let enriched = YFDecodedHistoryMetadataStore.shared.record(
                 metadata: enrichedMetadata,
-                intervalUsed: .oneHour
+                intervalUsed: .oneHour,
+                symbol: symbol
             )
-            historyMetadataSnapshots[symbol] = enriched
             return YFHistoryMetadataResult(
                 metadata: enriched.metadata,
                 intervalUsed: enriched.intervalUsed,
