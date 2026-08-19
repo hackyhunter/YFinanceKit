@@ -110,14 +110,14 @@ final class YFinanceHistoryMetadataTests: XCTestCase {
                         body: #"{"chart":{"result":null,"error":{"code":"Not Found","description":"No intraday data"}}}"#
                     )
                 }
-                return Self.response(url: url, body: Self.dailyMetadataBody)
+                return Self.response(url: url, body: Self.novnDailyMetadataBody)
             }
             throw MetadataTestError.unexpectedURL(url.absoluteString)
         }
         defer { MetadataURLProtocol.handler = nil }
 
         let result = try await client.robustHistoryMetadata(
-            symbol: "ROG.SW",
+            symbol: "NOVN.SW",
             includeTradingPeriods: true
         )
 
@@ -138,6 +138,8 @@ final class YFinanceHistoryMetadataTests: XCTestCase {
     private static let dailyMetadataBody = #"{"chart":{"result":[{"meta":{"currency":"CHF","symbol":"ROG.SW","exchangeName":"EBS","instrumentType":"EQUITY","exchangeTimezoneName":"Europe/Zurich"},"timestamp":[],"indicators":{"quote":[{}]}}],"error":null}}"#
 
     private static let hourlyMetadataBody = #"{"chart":{"result":[{"meta":{"currency":"CHF","symbol":"ROG.SW","exchangeName":"EBS","instrumentType":"EQUITY","exchangeTimezoneName":"Europe/Zurich","tradingPeriods":{"regular":[[{"timezone":"CET","start":1787020800,"end":1787051400,"gmtoffset":7200}]]}},"timestamp":[],"indicators":{"quote":[{}]}}],"error":null}}"#
+
+    private static let novnDailyMetadataBody = #"{"chart":{"result":[{"meta":{"currency":"CHF","symbol":"NOVN.SW","exchangeName":"EBS","instrumentType":"EQUITY","exchangeTimezoneName":"Europe/Zurich"},"timestamp":[],"indicators":{"quote":[{}]}}],"error":null}}"#
 
     private static let aaplHistoryBody = """
     {
