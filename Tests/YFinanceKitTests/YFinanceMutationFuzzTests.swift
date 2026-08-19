@@ -165,7 +165,8 @@ final class YFinanceMutationFuzzTests: XCTestCase {
             }
         default:
             mutateQuoteObject(object: &object) { quote in
-                quote.removeValue(forKey: ["open", "high", "low", "close", "volume"][rng.nextInt(upperBound: 5)])
+                let columns = ["open", "high", "low", "close", "volume"]
+                quote.removeValue(forKey: columns[rng.nextInt(upperBound: columns.count)])
             }
         }
     }
@@ -217,7 +218,7 @@ final class YFinanceMutationFuzzTests: XCTestCase {
     }
 
     private func makeSession(body: Data) -> URLSession {
-        MutationFuzzURLProtocol.body = body
+        MutationFuzzURLProtocol.setBody(body)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MutationFuzzURLProtocol.self]
         return URLSession(configuration: configuration)
@@ -251,11 +252,38 @@ private enum MutationFuzzTestError: Error {
     case unexpectedURL(String)
 }
 
+private final class MutationFuzzProtocolState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var body = Data()
+
+    func reset() {
+        lock.lock()
+        body = Data()
+        lock.unlock()
+    }
+
+    func setBody(_ value: Data) {
+        lock.lock()
+        body = value
+        lock.unlock()
+    }
+
+    func currentBody() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return body
+    }
+}
+
 private final class MutationFuzzURLProtocol: URLProtocol {
-    static var body = Data()
+    private static let state = MutationFuzzProtocolState()
 
     static func reset() {
-        body = Data()
+        state.reset()
+    }
+
+    static func setBody(_ body: Data) {
+        state.setBody(body)
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -281,7 +309,7 @@ private final class MutationFuzzURLProtocol: URLProtocol {
             contentType = "text/plain"
         } else if url.path.hasPrefix("/v8/finance/chart/") {
             status = 200
-            responseBody = Self.body
+            responseBody = Self.state.currentBody()
             contentType = "application/json"
         } else {
             client?.urlProtocol(
