@@ -601,6 +601,23 @@ public actor YFResilientClient {
         client
     }
 
+    /// Runs a lower-volume compatibility operation through the same global
+    /// Yahoo coordinator used by quote, history, metadata and financials.
+    /// This is intentionally not a second retry layer: callers supply the raw
+    /// operation while this actor supplies the one shared concurrency gate,
+    /// transient retry policy, diagnostics and 429 cooldown.
+    public func perform<T: Sendable>(
+        endpoint: String,
+        resource: String,
+        operation: @Sendable @escaping (YFinanceClient) async throws -> T
+    ) async throws -> T {
+        let client = self.client
+        let coordinator = self.coordinator
+        return try await coordinator.execute(endpoint: endpoint, resource: resource) {
+            try await operation(client)
+        }
+    }
+
     public func quote(symbol: String) async throws -> YFQuote? {
         let symbol = Self.cleanSymbol(symbol)
         if let existing = quoteFlights[symbol] {

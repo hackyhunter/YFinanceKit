@@ -1094,7 +1094,8 @@ public actor YFinanceClient {
         bars.reserveCapacity(timestamps.count)
 
         for (index, timestamp) in timestamps.enumerated() {
-            let volumeValue = value(at: quote?.volume, index: index).map { Int($0) }
+            let volumeValue = value(at: quote?.volume, index: index)
+                .flatMap { YFNumericSafety.nonNegativeInteger(from: $0) }
             bars.append(
                 YFHistoryBar(
                     date: Date(timeIntervalSince1970: TimeInterval(timestamp)),
@@ -1160,30 +1161,14 @@ public actor YFinanceClient {
 
         if repair {
             let originalCurrency = meta.currency
-            let barsBeforeCurrencyStandardization = bars
             let standardized = standardizeSubunitCurrencyIfNeeded(
                 bars: bars,
                 events: historyEvents,
                 meta: meta,
                 calendar: exchangeCalendar
             )
-            let restoreSubunitAfterRepair: Bool = {
-                guard let originalCurrency,
-                      originalCurrency == "GBp" || originalCurrency == "ZAc" || originalCurrency == "ILA" else {
-                    return false
-                }
-                for (before, after) in zip(barsBeforeCurrencyStandardization, standardized.bars) {
-                    guard let beforeClose = before.close,
-                          let afterClose = after.close,
-                          beforeClose.isFinite,
-                          afterClose.isFinite,
-                          beforeClose != 0 else {
-                        continue
-                    }
-                    return abs((afterClose / beforeClose) - 0.01) < 0.000_001
-                }
-                return false
-            }()
+            let restoreSubunitAfterRepair = standardized.pricesScaled
+                && (originalCurrency == "GBp" || originalCurrency == "ZAc" || originalCurrency == "ILA")
             bars = standardized.bars
             historyEvents = standardized.events
             meta = standardized.meta
@@ -1226,12 +1211,25 @@ public actor YFinanceClient {
                 }
             }
 
+            // Repair bounded interior 100x blocks before the edge-oriented
+            // unit-switch algorithm can mistake one transition for a genuine
+            // quotation switch and rescale an entire side of the table.
+            let boundedBlockRepair = YFHistorySeries(
+                symbol: meta.symbol ?? symbol,
+                meta: meta,
+                interval: workingInterval,
+                bars: bars,
+                events: historyEvents,
+                repairEnabled: true
+            ).repairingInteriorUnitScaleBlocks()
+            bars = boundedBlockRepair.series.bars
             bars = repairHundredXAnomalies(bars)
 
             let unitSwitchRepaired = repairUnitSwitchIfNeeded(
                 bars: bars,
                 events: historyEvents,
                 meta: meta,
+                currencyWasScaled: standardized.pricesScaled,
                 interval: workingInterval,
                 calendar: exchangeCalendar
             )
@@ -1358,6 +1356,7 @@ public actor YFinanceClient {
             var adjustedClose: Double?
             var volume: Int = 0
             var volumeSeen = false
+            var volumeOverflowed = false
             var repaired = false
         }
 
@@ -1385,8 +1384,14 @@ public actor YFinanceClient {
                     existing.adjustedClose = bar.adjustedClose
                 }
                 if let volume = bar.volume {
-                    existing.volume += volume
                     existing.volumeSeen = true
+                    if !existing.volumeOverflowed,
+                       let sum = YFNumericSafety.sumNonNegative([existing.volume, volume]) {
+                        existing.volume = sum
+                    } else {
+                        existing.volume = 0
+                        existing.volumeOverflowed = true
+                    }
                 }
                 buckets[key] = existing
             } else {
@@ -1400,8 +1405,12 @@ public actor YFinanceClient {
                     repaired: bar.repaired
                 )
                 if let volume = bar.volume {
-                    bucket.volume = volume
                     bucket.volumeSeen = true
+                    if let validated = YFNumericSafety.sumNonNegative([volume]) {
+                        bucket.volume = validated
+                    } else {
+                        bucket.volumeOverflowed = true
+                    }
                 }
                 buckets[key] = bucket
             }
@@ -1419,7 +1428,7 @@ public actor YFinanceClient {
                     low: bucket.low,
                     close: bucket.close,
                     adjustedClose: bucket.adjustedClose,
-                    volume: bucket.volumeSeen ? bucket.volume : nil,
+                    volume: bucket.volumeSeen && !bucket.volumeOverflowed ? bucket.volume : nil,
                     repaired: bucket.repaired
                 )
             }
@@ -1445,6 +1454,7 @@ public actor YFinanceClient {
             var adjustedClose: Double?
             var volume: Int = 0
             var volumeSeen = false
+            var volumeOverflowed = false
             var repaired = false
         }
 
@@ -1475,8 +1485,14 @@ public actor YFinanceClient {
                     existing.adjustedClose = bar.adjustedClose
                 }
                 if let volume = bar.volume {
-                    existing.volume += volume
                     existing.volumeSeen = true
+                    if !existing.volumeOverflowed,
+                       let sum = YFNumericSafety.sumNonNegative([existing.volume, volume]) {
+                        existing.volume = sum
+                    } else {
+                        existing.volume = 0
+                        existing.volumeOverflowed = true
+                    }
                 }
                 buckets[key] = existing
             } else {
@@ -1490,8 +1506,12 @@ public actor YFinanceClient {
                     repaired: bar.repaired
                 )
                 if let volume = bar.volume {
-                    bucket.volume = volume
                     bucket.volumeSeen = true
+                    if let validated = YFNumericSafety.sumNonNegative([volume]) {
+                        bucket.volume = validated
+                    } else {
+                        bucket.volumeOverflowed = true
+                    }
                 }
                 buckets[key] = bucket
             }
@@ -1506,7 +1526,7 @@ public actor YFinanceClient {
                 low: bucket.low,
                 close: bucket.close,
                 adjustedClose: bucket.adjustedClose,
-                volume: bucket.volumeSeen ? bucket.volume : nil,
+                volume: bucket.volumeSeen && !bucket.volumeOverflowed ? bucket.volume : nil,
                 repaired: bucket.repaired
             )
         }
@@ -1900,8 +1920,9 @@ public actor YFinanceClient {
     }
 
     private func mergeLiveBar(into base: YFHistoryBar, live: YFHistoryBar) -> YFHistoryBar {
-        let volumeSeen = (base.volume != nil) || (live.volume != nil)
-        let mergedVolume = (base.volume ?? 0) + (live.volume ?? 0)
+        let mergedVolume = YFNumericSafety.sumNonNegative(
+            [base.volume, live.volume].compactMap { $0 }
+        )
 
         let open = base.open ?? live.open
         var high = base.high
@@ -1922,7 +1943,7 @@ public actor YFinanceClient {
             low: low,
             close: close,
             adjustedClose: adjustedClose,
-            volume: volumeSeen ? mergedVolume : nil,
+            volume: mergedVolume,
             repaired: base.repaired || live.repaired
         )
     }
@@ -2207,8 +2228,7 @@ public actor YFinanceClient {
             func scaledAggregate(_ aggregate: YFAggregatedBar) -> YFAggregatedBar {
                 let volume: Int? = aggregate.volume.flatMap { value in
                     let scaled = Double(value) * volumeScale
-                    guard scaled.isFinite, scaled >= 0 else { return value }
-                    return Int(scaled.rounded())
+                    return YFNumericSafety.nonNegativeInteger(from: scaled, rounding: .toNearestOrAwayFromZero)
                 }
                 return YFAggregatedBar(
                     open: aggregate.open.map { $0 * priceScale },
@@ -2577,8 +2597,7 @@ public actor YFinanceClient {
         let high = highs.max()
         let low = lows.min()
 
-        let volumes = sorted.compactMap { $0.volume }
-        let volume = volumes.isEmpty ? nil : volumes.reduce(0, +)
+        let volume = YFNumericSafety.sumNonNegative(sorted.compactMap { $0.volume })
 
         return YFAggregatedBar(open: open, high: high, low: low, close: close, volume: volume)
     }
@@ -2672,13 +2691,13 @@ public actor YFinanceClient {
         events: [YFHistoryEvent],
         meta: YFHistoryMeta,
         calendar: Calendar
-    ) -> (bars: [YFHistoryBar], events: [YFHistoryEvent], meta: YFHistoryMeta) {
+    ) -> (bars: [YFHistoryBar], events: [YFHistoryEvent], meta: YFHistoryMeta, pricesScaled: Bool) {
         guard !bars.isEmpty else {
-            return (bars, events, meta)
+            return (bars, events, meta, false)
         }
 
         guard let currency = meta.currency else {
-            return (bars, events, meta)
+            return (bars, events, meta, false)
         }
 
         let targetCurrency: String
@@ -2694,13 +2713,13 @@ public actor YFinanceClient {
             targetCurrency = "ILS"
             factor = 0.01
         default:
-            return (bars, events, meta)
+            return (bars, events, meta, false)
         }
 
         guard let lastIndex = bars.indices.reversed().first(where: { (bars[$0].volume ?? 0) > 0 }),
               let lastClose = sanitizePrice(bars[lastIndex].close),
               lastClose > 0 else {
-            return (bars, events, meta)
+            return (bars, events, meta, false)
         }
 
         var pricesInSubunits = true
@@ -2759,7 +2778,7 @@ public actor YFinanceClient {
         }
 
         let updatedMeta = metaWithCurrency(meta, currency: targetCurrency, scale: pricesInSubunits ? factor : nil)
-        return (scaledBars, scaledEvents, updatedMeta)
+        return (scaledBars, scaledEvents, updatedMeta, pricesInSubunits)
     }
 
     private func convertDividendCurrenciesIfNeeded(
@@ -2879,6 +2898,7 @@ public actor YFinanceClient {
         bars: [YFHistoryBar],
         events: [YFHistoryEvent],
         meta: YFHistoryMeta,
+        currencyWasScaled: Bool,
         interval: Interval,
         calendar: Calendar
     ) -> (bars: [YFHistoryBar], events: [YFHistoryEvent]) {
@@ -2923,6 +2943,33 @@ public actor YFinanceClient {
             }
         }
 
+        // Window medians identify the switch robustly, but their first valid
+        // window can begin a few rows before the actual boundary. Refine the
+        // candidate to the nearest adjacent 100x transition so only the true
+        // switched segment is marked and scaled.
+        if let coarse = best {
+            let lower = max(1, coarse.breakIndex - window)
+            let upper = min(bars.count - 1, coarse.breakIndex + window)
+            var refined: Candidate?
+            for index in lower...upper {
+                guard let before = sanitizePrice(bars[index - 1].close),
+                      let after = sanitizePrice(bars[index].close),
+                      before > 0,
+                      after > 0 else {
+                    continue
+                }
+                let ratio = after / before
+                let distance = min(relativeDistance(ratio, n), relativeDistance(ratio, 1 / n))
+                guard distance < 0.15 else { continue }
+                if distance < (refined?.distance ?? .infinity) {
+                    refined = Candidate(breakIndex: index, ratio: ratio, distance: distance)
+                }
+            }
+            if let refined {
+                best = refined
+            }
+        }
+
         guard let candidate = best,
               candidate.ratio.isFinite,
               candidate.ratio > 0 else {
@@ -2941,17 +2988,20 @@ public actor YFinanceClient {
             return (bars, events)
         }
 
-        let lastClose = bars.last.flatMap { sanitizePrice($0.close) }
-        let marketPrice = sanitizePrice(meta.regularMarketPrice)
-        var scaleSuffix = false
-        if let marketPrice, let lastClose, lastClose > 0 {
-            let ratio = marketPrice / lastClose
-            if relativeDistance(ratio, n) < 0.2 || relativeDistance(ratio, 1 / n) < 0.2 {
-                scaleSuffix = true
-            }
+        // A quotation-unit switch can be oriented from the table itself. If
+        // subunit standardisation already divided the table, repair the
+        // smaller side upward; otherwise repair the larger side downward.
+        // This avoids a recency-sensitive regularMarketPrice anchor and never
+        // needs a whole-table revert with inverted repaired flags.
+        let scaleSuffix: Bool
+        let priceFactor: Double
+        if currencyWasScaled {
+            scaleSuffix = candidate.ratio < 1
+            priceFactor = candidate.ratio < 1 ? (1 / candidate.ratio) : candidate.ratio
+        } else {
+            scaleSuffix = candidate.ratio > 1
+            priceFactor = candidate.ratio < 1 ? candidate.ratio : (1 / candidate.ratio)
         }
-
-        let priceFactor = scaleSuffix ? (1 / candidate.ratio) : candidate.ratio
         guard priceFactor.isFinite,
               priceFactor > 0,
               relativeDistance(priceFactor, 1) > 0.05 else {
@@ -4477,9 +4527,10 @@ public actor YFinanceClient {
             return bar
         }
         let scaled = Double(volume) * factor
-        guard scaled.isFinite, scaled >= 0 else {
-            return bar
-        }
+        let scaledVolume = YFNumericSafety.nonNegativeInteger(
+            from: scaled,
+            rounding: .toNearestOrAwayFromZero
+        )
         return YFHistoryBar(
             date: bar.date,
             open: bar.open,
@@ -4487,7 +4538,7 @@ public actor YFinanceClient {
             low: bar.low,
             close: bar.close,
             adjustedClose: bar.adjustedClose,
-            volume: Int(scaled.rounded()),
+            volume: scaledVolume,
             repaired: bar.repaired
         )
     }

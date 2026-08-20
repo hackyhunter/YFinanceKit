@@ -6,14 +6,14 @@ Native Swift implementation of Yahoo Finance behavior for iOS/macOS, designed as
 
 YFinanceKit tracks two versions independently:
 
-- Swift package implementation: `0.2.0-dev.1`
+- Swift package implementation: `0.2.0-dev.4`
 - upstream yfinance compatibility target: `1.6.0`
 - audited upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
 - audited upstream date: `2026-08-13`
 
 These are exposed through `YFinanceKitBuildInfo` plus compatibility constants such as `__version__`.
 
-The current `0.2.0-dev.1` snapshot has substantial new resilience/hardening work and should be locally built/tested before being treated as a stable release or used to advance an app pin.
+The current `0.2.0-dev.4` snapshot includes the verified resilience core, lazy history metadata, checked provider-number handling, and core unit-switch repair regressions. It remains a development build and must pass the local release gates before an app pin advances.
 
 ## What is implemented
 
@@ -137,12 +137,11 @@ The resilience layer provides:
 - fresh/stale/expired in-memory quote/history caches
 - request/cache/coalescing diagnostics
 - injectable clock/jitter sources for deterministic tests
+- `perform(endpoint:resource:operation:)` for lower-volume compatibility calls that must share the same coordinator/session
 
-### Known core rate-limit limitation
+### Core rate-limit behavior
 
-The legacy query1/query2 request path may still perform one Yahoo cookie-strategy/crumb refresh after a target request fails, including a target 429, before the final 429 reaches `YFRequestCoordinator`.
-
-The resilience layer never adds another retry after that final 429. A future local surgical core change should skip session refresh for target 429 responses and expose `Retry-After` response headers.
+Target-endpoint 429 responses bypass cookie/crumb strategy refresh, preserve HTTP `Retry-After` as structured error metadata, and open the shared coordinator cooldown without another retry. Auth/session recovery remains available for actual authentication failures.
 
 ## Financial statements
 
@@ -185,9 +184,9 @@ Additional conservative hardening APIs include:
 - `trimmingEvents(to:)`
 - `safelyRepairedHistory(...)`
 
-The bounded 100x repair only corrects a strongly evidenced interior block with paired inverse scale transitions. It deliberately does not guess at a lone edge unit switch.
+The bounded 100x repair corrects only a strongly evidenced interior block with paired inverse scale transitions. The core repair pipeline applies that invariant before edge-oriented unit-switch handling, and orients genuine quotation switches from the table plus whether subunit standardisation actually scaled prices.
 
-`safelyRepairedHistory(...)` addresses the class of upstream issue described by yfinance PR #2927: if the legacy repair engine marks a suspiciously large fraction of a table, Swift makes one raw comparison request and only replaces the repaired result if raw history proves a bounded interior bad-unit block.
+`safelyRepairedHistory(...)` remains an optional defense-in-depth comparison: if a repaired result marks a suspiciously large fraction of a table, Swift makes one raw comparison request and only replaces it when raw history proves a bounded interior bad-unit block.
 
 ## Quick start
 
@@ -269,9 +268,9 @@ Run locally:
 
 ```bash
 bash tools/verify.sh
-bash tools/strict-concurrency.sh
+bash tools/strict-concurrency-audit.sh
 ```
 
-The second command runs the package tests with complete Swift strict-concurrency checking enabled.
+The second command builds and tests with complete Swift strict-concurrency checking and warnings promoted to errors.
 
 Do not tag a stable package release or advance a production app pin until both commands pass on a real checkout.

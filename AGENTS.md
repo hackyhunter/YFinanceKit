@@ -59,13 +59,13 @@ Important implementation details:
 - Automatic GitHub Actions remain manual-only. Do not add push/PR triggers for this branch.
 - `nommminal` and all Xcode/SwiftPM app pins remain untouched by this branch. Advance only to an exact commit after the normal local Swift and app/Xcode gates pass.
 
-## Local pickup: remote hardening work is staged, not compile-verified
+## Historical hardening pickup: applied and locally verified
 
-This section documents the earlier hardening handoff. Treat the August 19 lazy-metadata note above as the branch-specific pickup point and do not undo newer local/Xcode-verified work merely to reproduce the historical staging sequence.
+This section documents the earlier hardening handoff. The migrations landed in verified commit `8e79733e2c3729ed67e6563736e8080c3a8bfcb6`; do not replay them manually or undo newer lazy-metadata, numeric-safety, or repair work merely to reproduce the historical staging sequence.
 
-The remote work intentionally stopped short of applying the large exact migrations inside `YFinanceClient.swift` / `YFinanceResilience.swift`, because those edits should be followed immediately by a real Swift compile/test loop. Do **not** interpret current `main` as the final verified app candidate merely because the source and migration tooling are present.
+The migration scripts remain idempotent pickup tools for older checkouts. Current candidates must be judged by the final source-state, package, strict-concurrency, app-pin and Xcode gates—not by rerunning historical edits.
 
-Remote staging now includes:
+The completed hardening state includes:
 
 - isolated `YFURLSessionTransport` + tests
 - shared request coordinator, single-flight and SWR caches
@@ -75,17 +75,17 @@ Remote staging now includes:
 - cross-market parity tooling
 - adversarial schema tests plus deterministic 96-seed Yahoo JSON mutation fuzzing
 - focused quote/history/metadata/financial service facades
-- exact migration scripts for the remaining giant-client changes
+- exact migration scripts for older staged checkouts
 - static source-state gates
 - warnings-as-errors complete-concurrency gate
 - small live-parity gate
 
-Static review also found two subtle coordinator races that are deliberately handled by the final local migration chain:
+Two subtle coordinator races are handled by the final migration state:
 
 1. a task cancelled while queued for the global Yahoo permit could otherwise resume later and still start provider work;
 2. a request could pass the cooldown check, queue for a permit, then start after another request opened a 429 cooldown unless cooldown is rechecked after permit acquisition.
 
-The final local chain also:
+The completed local chain also:
 
 - extracts direct URLSession request I/O out of `YFinanceClient`;
 - prevents a target-endpoint 429 from triggering cookie/crumb strategy refresh and a second Yahoo request;
@@ -142,14 +142,17 @@ Only after those pass should Xcode be opened for the final app gate.
 
 See `FINAL_HARDENING_FLOW.md` and `RELEASE_CHECKLIST.md` for the same flow in runbook form.
 
-## What still requires a real local/Xcode environment
+## Candidate verification boundary
 
-Do not claim these are done until they actually run:
+For every new YFinanceKit candidate, rerun:
 
-- final Swift compilation after the exact giant-client migrations
-- all offline tests after those migrations
+- final prepared-source verification
+- all offline package tests
 - warnings-as-errors complete strict-concurrency audit
 - live Yahoo parity/smoke on the committed candidate
+
+For every new `nommminal` pin, rerun:
+
 - `nommminal` ProviderParity + Node bridge/client tests against that exact candidate SHA
 - Xcode Debug simulator build
 - Xcode Release simulator build

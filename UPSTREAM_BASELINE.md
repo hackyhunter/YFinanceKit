@@ -4,11 +4,12 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 
 ## Current baseline
 
-- Swift package implementation: **0.2.0-dev.1**
+- Swift package implementation: **0.2.0-dev.4**
 - Upstream compatibility target: **yfinance 1.6.0**
 - Upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
 - Upstream date: **2026-08-13**
-- Review date: **2026-08-19**
+- Review date: **2026-08-20**
+- The yfinance 1.6.0 release commit `93eb4c234acc7d0cf9d176e602b8443179546253` is runtime-code-equivalent to the recorded baseline; its intervening changes are repository automation only.
 
 ## Ported from the 1.3-1.6 cycle
 
@@ -35,6 +36,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Start/end resilient history trims corporate actions to the exact half-open request window.
 - Explicit Yahoo UTC and exchange-timezone date helpers avoid device-local timezone interpretation.
 - JSON non-finite values and unsafe integer conversions fail safely rather than reaching trapping conversions.
+- Chart volume conversion, scaling, live merge and resampling use checked integer conversion/addition; malformed or overflowing provider volume becomes absent rather than trapping.
 - `YFTickers.infoResult(...)` provides bounded best-effort multi-symbol metadata with isolated per-symbol failures.
 - Session regression tests cover DNS-blocked `fc.yahoo.com`, concurrent crumb callers, and 200-OK HTML/garbage crumb bodies.
 
@@ -46,11 +48,13 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 
 ### PR #2927: genuine partial 100x blocks / unit-switch revert
 
-**Relevant.** The Swift legacy unit-switch engine also models a single breakpoint and can scale an entire prefix/suffix. We did not copy the Python implementation into the giant client remotely. Instead:
+**Ported as Swift invariants.** The implementation does not copy pandas mechanics. It now:
 
-- bounded interior-block detection was added with offline tests
-- a heavily-repaired-result/raw-series comparison safety valve was added
-- a future local/surgical core edit can move the invariant directly into the legacy engine after full Swift tests
+- repairs paired-transition interior blocks before edge-oriented unit-switch handling
+- records whether subunit standardisation actually scaled prices and uses that state to orient a genuine switch without `regularMarketPrice`
+- refines window-based switch detection to the exact adjacent transition so repair flags stay local
+- keeps the heavily-repaired-result/raw-series comparison as optional defense in depth
+- covers partial blocks, wrongly divided blocks, scaled and relabel-only switches, mixed major units, and capital gains without dividends in deterministic offline tests
 
 ### PR #2947: calendar event epoch local-timezone bug
 
@@ -78,10 +82,8 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 
 ## Known remaining gaps / deliberate follow-ups
 
-- The core query1/query2 request layer currently invalidates/refetches the Yahoo crumb once after a failed authenticated request. That recovery is useful for 401/403/session failures, but it can also cause one alternate-session retry after a target HTTP 429 before the rate limit reaches the caller. A future surgical core edit should skip session refresh for 429, expose `Retry-After`, and treat target 429 strictly as backpressure.
-- The #2927 protection currently lives at the resilient/safety layer. Moving the bounded-block invariant directly into the private legacy repair function still requires a locally compiled surgical core patch.
 - Python yfinance 1.6 rewrites some Yahoo error text when a user asks for 30m data but the internal fetch uses 15m. Swift still surfaces the Yahoo description from the internal request without that user-facing annotation.
-- Full strict-concurrency and SwiftPM/Xcode verification cannot be run in this remote environment because it cannot resolve GitHub. Use `bash tools/verify.sh` and `bash tools/strict-concurrency.sh` locally before tagging a stable YFinanceKit release or advancing `nommminal`.
+- Every candidate still requires `bash tools/verify.sh` plus `bash tools/strict-concurrency-audit.sh`; app/Xcode/runtime acceptance is tracked separately in `nommminal`.
 
 ## Upstream watch
 

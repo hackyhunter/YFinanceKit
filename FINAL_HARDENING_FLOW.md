@@ -1,6 +1,6 @@
 # Final hardening flow
 
-This is the authoritative path from the remotely staged YFinanceKit source to a verified commit suitable for `nommminal`.
+This is the authoritative path from a YFinanceKit development candidate to an exact verified commit suitable for `nommminal`.
 
 ## 1. Prepare and verify the final offline candidate
 
@@ -9,6 +9,8 @@ In a normal local YFinanceKit checkout:
 ```sh
 python3 tools/prepare-hardening-candidate-final.py
 ```
+
+The command is idempotent and remains useful for older staged checkouts. On a source tree that is already prepared, `bash tools/final-offline-gate.sh` performs the same final verification without applying migrations.
 
 This applies the exact large-file migrations in order:
 

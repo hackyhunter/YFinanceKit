@@ -66,6 +66,39 @@ final class YFinanceResilientClientTests: XCTestCase {
         XCTAssertEqual(diagnostics.cacheHits, 1)
     }
 
+    func testGenericOperationUsesSharedCoordinatorAndDoesNotRetryRateLimit() async {
+        let counter = TestURLProtocolCounterState()
+        let resilient = YFResilientClient(
+            policy: YFRequestPolicy(
+                maxConcurrentRequests: 2,
+                maxAttempts: 3,
+                baseRetryDelay: 0,
+                maxRetryDelay: 0,
+                retryJitterFraction: 0,
+                baseRateLimitCooldown: 1,
+                maxRateLimitCooldown: 10,
+                traceCapacity: 10
+            )
+        )
+
+        do {
+            let _: String = try await resilient.perform(endpoint: "options", resource: "AAPL") { _ in
+                counter.increment()
+                throw YFinanceError.rateLimited(retryAfter: 4)
+            }
+            XCTFail("Expected provider backpressure to propagate")
+        } catch {
+            XCTAssertEqual(YFinanceErrorClassifier.kind(of: error), .rateLimited)
+        }
+
+        XCTAssertEqual(counter.snapshot(), 1)
+        let diagnostics = await resilient.diagnostics()
+        XCTAssertEqual(diagnostics.logicalRequests, 1)
+        XCTAssertEqual(diagnostics.attempts, 1)
+        XCTAssertEqual(diagnostics.rateLimits, 1)
+        XCTAssertNotNil(diagnostics.cooldownUntil)
+    }
+
     private func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ResilientURLProtocol.self]

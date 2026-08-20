@@ -35,21 +35,15 @@ Prioritize:
 
 Update `UPSTREAM_BASELINE.md` with decisions. Open PRs are regression evidence, not automatically accepted implementation.
 
-## 3. Apply the remaining surgical core rate-limit patch
+## 3. Confirm the prepared hardening source state
 
-The compatibility client is intentionally not whole-file rewritten through remote tooling. In a local checkout run:
+The strict target-429, `Retry-After`, transport extraction, cancellation-safe permit queue, and post-permit cooldown migrations are already present. Verify those invariants without mutating source:
 
 ```sh
-python3 tools/apply-core-rate-limit-hardening.py
+python3 tools/verify-final-hardening-source-state.py
 ```
 
-Review the resulting diff. It must remain narrowly scoped to:
-
-- target-endpoint 429 bypasses crumb/session-strategy refresh
-- HTTP `Retry-After` is parsed into structured `YFinanceError.retryAfter`
-- `YFRequestCoordinator` honors provider `Retry-After` when opening cooldown
-
-Do not accept unrelated giant-client churn in this step.
+Use `python3 tools/prepare-hardening-candidate-final.py` only when picking up an older staged checkout that still needs the idempotent migration chain.
 
 ## 4. Local package verification
 
@@ -57,7 +51,7 @@ Run:
 
 ```sh
 bash tools/verify.sh
-bash tools/strict-concurrency.sh
+bash tools/strict-concurrency-audit.sh
 ```
 
 Both must pass.
@@ -80,9 +74,12 @@ Confirm coverage is green for at least:
 - fresh/stale cache behavior
 - financial long-URL chunk fallback
 - malformed/null/type-shifted Yahoo JSON
+- extreme/out-of-range chart volume and aggregation overflow
 - history integrity
 - repair parity
 - bounded interior 100x repair
+- genuine unit-switch direction after scaled and relabel-only currency standardisation
+- capital gains without same-day dividends
 - suspicious-large-repair safety valve
 - history metadata fallback
 - multi-info partial failure
@@ -141,8 +138,8 @@ Before changing `master`:
 
 1. choose the exact verified YFinanceKit commit/tag
 2. update every app/package/Xcode reference together
-3. run `python3 scripts/apply-yfinance-hardening-integration.py`
-4. run `python3 scripts/verify-yfinance-hardening.py`
+3. run `python3 scripts/prepare-yfinance-hardening.py --revision <verified-yfinancekit-commit>`
+4. run `python3 scripts/verify-yfinance-hardening-all.py`
 5. run ProviderParity tests
 6. run JavaScript bridge/chart tests
 7. build Debug simulator

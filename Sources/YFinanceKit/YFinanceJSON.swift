@@ -67,12 +67,8 @@ public enum YFJSONValue: Sendable, Equatable {
     }
 
     public var intValue: Int? {
-        guard let value = doubleValue,
-              value >= Double(Int.min),
-              value <= Double(Int.max) else {
-            return nil
-        }
-        return Int(value)
+        guard let value = doubleValue else { return nil }
+        return YFNumericSafety.integer(from: value)
     }
 
     public subscript(key: String) -> YFJSONValue? {

@@ -12,7 +12,18 @@ final class YFinanceAdversarialTests: XCTestCase {
         XCTAssertNil(YFJSONValue.number(Double.infinity).doubleValue)
         XCTAssertNil(YFJSONValue.number(Double.nan).doubleValue)
         XCTAssertNil(YFJSONValue.number(Double.greatestFiniteMagnitude).intValue)
+        XCTAssertNil(YFJSONValue.number(Double(Int.max)).intValue)
         XCTAssertEqual(YFJSONValue.number(42).intValue, 42)
+        XCTAssertEqual(YFJSONValue.number(42.9).intValue, 42)
+        XCTAssertEqual(YFJSONValue.number(-42.9).intValue, -42)
+    }
+
+    func testProviderIntegerSafetyRejectsNegativeAndOverflowingVolume() {
+        XCTAssertNil(YFNumericSafety.nonNegativeInteger(from: -1))
+        XCTAssertNil(YFNumericSafety.nonNegativeInteger(from: Double(Int.max)))
+        XCTAssertNil(YFNumericSafety.sumNonNegative([Int.max, 1]))
+        XCTAssertNil(YFNumericSafety.sumNonNegative([1, -1]))
+        XCTAssertEqual(YFNumericSafety.sumNonNegative([4, 5, 6]), 15)
     }
 
     func testMalformedJSONThrowsInsteadOfProducingPartialValue() {
