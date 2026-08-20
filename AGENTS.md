@@ -47,7 +47,7 @@ For open upstream PRs, port the regression case before borrowing implementation.
 
 ## August 19 2026 pickup: lazy history metadata
 
-Branch `port/lazy-history-metadata` is cut from the current hardening `main` and ports the behavior of upstream yfinance PR #2922 without changing Xcode/app package state.
+The work developed on branch `port/lazy-history-metadata` ports the behavior of upstream yfinance PR #2922 and is included in the current verified candidate.
 
 Important implementation details:
 
@@ -57,7 +57,7 @@ Important implementation details:
 - The `5d/1h` enrichment is best-effort, cached after success, and must not invalidate otherwise-valid core metadata when it fails.
 - `YFinanceHistoryMetadataTests.swift` includes offline request-count coverage for history-to-metadata reuse, explicit hourly enrichment, repeat enrichment caching, and non-fatal intraday failure.
 - Automatic GitHub Actions remain manual-only. Do not add push/PR triggers for this branch.
-- `nommminal` and all Xcode/SwiftPM app pins remain untouched by this branch. Advance only to an exact commit after the normal local Swift and app/Xcode gates pass.
+- `nommminal` advanced only after the package gates passed and still pins one exact commit rather than this branch name.
 
 ## Historical hardening pickup: applied and locally verified
 

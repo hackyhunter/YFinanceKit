@@ -4,7 +4,7 @@ YFinanceKit is a native Swift Yahoo Finance implementation that tracks Python yf
 
 ## Identity
 
-- Swift implementation version: `0.2.0-dev.3`
+- Swift implementation version: `0.2.0-dev.4`
 - yfinance compatibility target: `1.6.0`
 - upstream baseline: `0af231f6a47eee5e773290830d228de0c20d5ee1` (2026-08-13)
 
@@ -104,7 +104,7 @@ A 429 is provider backpressure, not evidence that the cookie/crumb strategy is i
 
 `YFinanceError.rateLimited(retryAfter:)` and `YFinanceError.retryAfter` carry provider backpressure metadata without adding a new enum case that would source-break exhaustive downstream switches.
 
-The final strict 429 behavior is applied locally as part of candidate preparation:
+The checked-in strict 429 behavior guarantees:
 
 - target endpoint 429 bypasses crumb/session-strategy refresh
 - `Retry-After` is captured
@@ -250,19 +250,19 @@ The app has a dedicated staging branch:
 
 `yfinance-hardening-integration`
 
-That branch stages:
+That branch integrates:
 
 - one app-facing resilient market-data broker
 - priority/background budgeting
 - additive bridge schema v2
 - backward-compatible JS bridge metadata
 - real race-safe Swift task cancellation
-- quote/chart/revenue broker migration without changing endpoint data contracts
+- quote/chart/revenue plus lower-volume endpoint coordination without changing endpoint data contracts
 - app-local last-known-good snapshot policy + fallback
 - deterministic `.pbxproj` source/pin edits
 - complete non-Xcode preparation + verification scripts
 
-`nommminal/master` stays on the last Xcode-verified state until those gates pass.
+`nommminal/master` stays on the last accepted state until the remaining manual app matrix passes.
 
 There is no App Group entitlement today. The current widget does not contact Yahoo, so app/widget market-data sharing is optional and remains an Xcode signing/capability choice.
 
@@ -273,16 +273,18 @@ Automatic CI and Dependabot remain disabled.
 In a **local YFinanceKit checkout**, the authoritative candidate flow is:
 
 ```sh
-python3 tools/prepare-hardening-candidate.py
+python3 tools/prepare-hardening-candidate-final.py
 ```
 
-That command:
+That idempotent command verifies the complete prepared state and, for an older staged checkout, applies the remaining migrations in this order:
 
-1. applies `tools/apply-transport-extraction.py`
-2. applies `tools/apply-core-rate-limit-hardening.py`
-3. verifies the expected source state
-4. runs `tools/verify.sh`
-5. runs complete strict-concurrency checking
+1. `tools/apply-transport-extraction.py`
+2. `tools/apply-coordinator-cancellation-hardening.py`
+3. `tools/apply-post-permit-cooldown-recheck.py`
+4. `tools/apply-core-rate-limit-hardening.py`
+5. final prepared-source verification
+6. `tools/verify.sh`
+7. complete strict-concurrency checking
 
 `tools/verify.sh` itself performs:
 
@@ -301,20 +303,15 @@ python3 scripts/verify-yfinance-hardening-all.py
 
 Only after those non-Xcode gates pass should Xcode be opened for Debug/Release builds and runtime smoke.
 
-## Remaining hard boundaries
+## Current verification boundary
 
-These are not honestly solvable from the current remote-only environment:
+The `0.2.0-dev.4` candidate has completed:
 
-- execute/review the exact giant-client transport + strict-429 migrations
-- compile all Swift source and tests
-- complete strict-concurrency audit
-- run the live cross-market parity matrix
-- small live Yahoo smoke from a normal network
-- commit the verified final YFinanceKit candidate
-- run nommminal's deterministic integration migration against that final commit
-- Xcode Debug/Release simulator build
-- simulator launch/function smoke
-- real-device Yahoo/session/cancellation smoke
-- signing/App Group work only if shared widget market snapshots are desired
+- final prepared-source verification
+- normal package build and 94 offline tests
+- complete strict-concurrency build/tests with warnings promoted to errors
+- bounded live Yahoo parity gate with 2 pass, 0 warn, 0 fail and 2 expected earnings-date skips
+- exact `nommminal` integration pin and full app pre-Xcode gate
+- app Debug/Release simulator builds and launch/search/live-quote smoke
 
-Until those happen, this source tree is a hardened **pre-release candidate staging state**, not a claimed production-verified release.
+It remains a development candidate rather than a stable package release. Before tagging or advancing `nommminal/master`, finish the deliberately manual app checks: coalescing/cache proof, chart range and intraday UI, rapid-switch cancellation, network-off stale continuity, controlled 429/Retry-After behavior, background refresh, preferably a real-device Yahoo session smoke, and privacy/archive validation. Run the broad live cross-market matrix only when release evidence warrants the added Yahoo traffic.

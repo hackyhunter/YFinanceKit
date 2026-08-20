@@ -13,7 +13,7 @@ YFinanceKit tracks two versions independently:
 
 These are exposed through `YFinanceKitBuildInfo` plus compatibility constants such as `__version__`.
 
-The current `0.2.0-dev.4` snapshot includes the verified resilience core, lazy history metadata, checked provider-number handling, and core unit-switch repair regressions. It remains a development build and must pass the local release gates before an app pin advances.
+The current `0.2.0-dev.4` snapshot includes the verified resilience core, lazy history metadata, checked provider-number handling, and core unit-switch repair regressions. Its offline, strict-concurrency, bounded-live, and exact app-integration gates have passed; it remains a development build until the remaining manual app/release checks justify a stable tag.
 
 ## What is implemented
 
