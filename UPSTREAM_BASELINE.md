@@ -8,7 +8,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Upstream compatibility target: **yfinance 1.6.0**
 - Upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
 - Upstream date: **2026-08-13**
-- Review date: **2026-08-18**
+- Review date: **2026-08-26**
 
 ## Ported from the 1.3-1.6 cycle
 
@@ -25,6 +25,13 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Read-only history-integrity diagnostics for malformed OHLC, duplicate/non-monotonic timestamps, negative volume, non-finite values, and classic 100x unit jumps that survive processing.
 - Resilient history metadata: try intraday enrichment for `tradingPeriods`, then fall back to daily metadata for otherwise-valid tickers.
 
+## Selected post-1.6 dev fixes
+
+These fixes are deliberately ported without advancing the compatibility baseline beyond yfinance 1.6.0.
+
+- PR #2953 cookie/crumb resilience: query1/query2 requests that declare `requiresCrumb: false` opportunistically use the shared Yahoo crumb, but transient bootstrap failures, crumb rate limits, or an unavailable crumb can degrade to a crumb-less target request. A real target 429 remains terminal, preserves `Retry-After`, and does not trigger session refresh. Python's per-request proxy preservation fix is not applicable to the injected `URLSession` transport.
+- PR #2958 plus follow-up `5c1f64e`: stock-split and unit-switch repair validate candidate ranges using aggregate denoised volume rather than one boundary pair, count only positive volume toward the sample budget, expand into neighboring ranges/gaps for short candidates, use the relaxed `0.2` volume-unit-change threshold coefficient, and treat missing usable local volume as insufficient evidence rather than a veto.
+
 ## Swift hardening beyond direct parity
 
 - `YFRequestCoordinator` centralizes bounded concurrency, transient retry with jitter, shared 429 cooldown, and diagnostics.
@@ -36,7 +43,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Explicit Yahoo UTC and exchange-timezone date helpers avoid device-local timezone interpretation.
 - JSON non-finite values and unsafe integer conversions fail safely rather than reaching trapping conversions.
 - `YFTickers.infoResult(...)` provides bounded best-effort multi-symbol metadata with isolated per-symbol failures.
-- Session regression tests cover DNS-blocked `fc.yahoo.com`, concurrent crumb callers, and 200-OK HTML/garbage crumb bodies.
+- Session regression tests cover DNS-blocked `fc.yahoo.com`, concurrent crumb callers, 200-OK HTML/garbage crumb bodies, crumb-bootstrap degradation, and target-429 no-refresh behavior.
 
 ## August 2026 upstream PR review
 
@@ -74,10 +81,9 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 
 ## Known remaining gaps / deliberate follow-ups
 
-- The core query1/query2 request layer currently invalidates/refetches the Yahoo crumb once after a failed authenticated request. That recovery is useful for 401/403/session failures, but it can also cause one alternate-session retry after a target HTTP 429 before the rate limit reaches the caller. A future surgical core edit should skip session refresh for 429, expose `Retry-After`, and treat target 429 strictly as backpressure.
 - The #2927 protection currently lives at the resilient/safety layer. Moving the bounded-block invariant directly into the private legacy repair function still requires a locally compiled surgical core patch.
 - Python yfinance 1.6 rewrites some Yahoo error text when a user asks for 30m data but the internal fetch uses 15m. Swift still surfaces the Yahoo description from the internal request without that user-facing annotation.
-- Full strict-concurrency and SwiftPM/Xcode verification cannot be run in this remote environment because it cannot resolve GitHub. Use `bash tools/verify.sh` and `bash tools/strict-concurrency.sh` locally before tagging a stable YFinanceKit release or advancing `nommminal`.
+- Full strict-concurrency and SwiftPM/Xcode verification should still be run before tagging a stable YFinanceKit release or advancing `nommminal`.
 
 ## Upstream watch
 
