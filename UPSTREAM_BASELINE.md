@@ -8,7 +8,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Upstream compatibility target: **yfinance 1.6.0**
 - Upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
 - Upstream date: **2026-08-13**
-- Review date: **2026-08-20**
+- Review date: **2026-08-26**
 - The yfinance 1.6.0 release commit `93eb4c234acc7d0cf9d176e602b8443179546253` is runtime-code-equivalent to the recorded baseline; its intervening changes are repository automation only.
 
 ## Ported from the 1.3-1.6 cycle
@@ -26,6 +26,13 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Read-only history-integrity diagnostics for malformed OHLC, duplicate/non-monotonic timestamps, negative volume, non-finite values, and classic 100x unit jumps that survive processing.
 - Lazy history metadata parity from upstream PR #2922: recent typed chart/history decode seeds core symbol metadata; `5d/1h` `tradingPeriods` enrichment is explicit, cached, and non-fatal on failure.
 
+## Selected post-1.6 dev fixes
+
+These fixes are deliberately ported without advancing the compatibility baseline beyond yfinance 1.6.0.
+
+- PR #2953 cookie/crumb resilience: query1/query2 requests that declare `requiresCrumb: false` opportunistically use the shared Yahoo crumb, but transient bootstrap failures, crumb rate limits, or an unavailable crumb can degrade to a crumb-less target request. A real target 429 remains terminal, preserves `Retry-After`, and does not trigger session refresh. Python's per-request proxy preservation fix is not applicable to the injected `URLSession` transport.
+- PR #2958 plus follow-up `5c1f64e`: stock-split and unit-switch repair validate candidate ranges using aggregate denoised volume rather than one boundary pair, count only positive volume toward the sample budget, expand into neighboring ranges/gaps for short candidates, use the relaxed `0.2` volume-unit-change threshold coefficient, and treat missing usable local volume as insufficient evidence rather than a veto.
+
 ## Swift hardening beyond direct parity
 
 - `YFRequestCoordinator` centralizes bounded concurrency, transient retry with jitter, shared 429 cooldown, and diagnostics.
@@ -38,7 +45,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - JSON non-finite values and unsafe integer conversions fail safely rather than reaching trapping conversions.
 - Chart volume conversion, scaling, live merge and resampling use checked integer conversion/addition; malformed or overflowing provider volume becomes absent rather than trapping.
 - `YFTickers.infoResult(...)` provides bounded best-effort multi-symbol metadata with isolated per-symbol failures.
-- Session regression tests cover DNS-blocked `fc.yahoo.com`, concurrent crumb callers, and 200-OK HTML/garbage crumb bodies.
+- Session regression tests cover DNS-blocked `fc.yahoo.com`, concurrent crumb callers, 200-OK HTML/garbage crumb bodies, crumb-bootstrap degradation, and target-429 no-refresh behavior.
 
 ## August 2026 upstream PR review
 

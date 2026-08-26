@@ -810,15 +810,32 @@ public actor YFinanceClient {
     ) async throws -> Data {
         let baseURL = baseURL(for: host)
         let shouldUseCrumb: Bool
+        let crumbIsOptional: Bool
         switch host {
         case .query1, .query2:
-            // Modern yfinance authenticates Yahoo API traffic through one
-            // cookie/crumb session, including chart/history and timeseries.
+            // Match yfinance dev after #2953: Yahoo API traffic may opportunistically
+            // use the shared cookie/crumb session, but endpoints such as chart/history
+            // must still be allowed to decide for themselves when bootstrap fails.
             shouldUseCrumb = true
+            crumbIsOptional = !requiresCrumb
         case .root:
             shouldUseCrumb = requiresCrumb
+            crumbIsOptional = false
         }
-        let crumb = shouldUseCrumb ? (try await crumbStore.currentCrumb()) : nil
+
+        let crumb: String?
+        if shouldUseCrumb {
+            do {
+                crumb = try await crumbStore.currentCrumb()
+            } catch {
+                guard crumbIsOptional, canDegradeOptionalCrumbBootstrap(error) else {
+                    throw error
+                }
+                crumb = nil
+            }
+        } else {
+            crumb = nil
+        }
         let effectiveTimeout = normalizedTimeout(timeout)
 
         do {
@@ -844,7 +861,15 @@ public actor YFinanceClient {
             }
 
             await crumbStore.invalidate()
-            let refreshedCrumb = try await crumbStore.currentCrumb(forceRefresh: true)
+            let refreshedCrumb: String?
+            do {
+                refreshedCrumb = try await crumbStore.currentCrumb(forceRefresh: true)
+            } catch {
+                guard crumbIsOptional, canDegradeOptionalCrumbBootstrap(error) else {
+                    throw error
+                }
+                refreshedCrumb = nil
+            }
             return try await executeRequest(
                 baseURL: baseURL,
                 path: path,
@@ -1029,6 +1054,19 @@ public actor YFinanceClient {
         }
 
         return components.url?.absoluteString ?? url.absoluteString
+    }
+
+    private func canDegradeOptionalCrumbBootstrap(_ error: Error) -> Bool {
+        if YFinanceErrorClassifier.isTransient(error) {
+            return true
+        }
+        guard let yfError = error as? YFinanceError else {
+            return false
+        }
+        if case .missingData(let message) = yfError {
+            return message.localizedCaseInsensitiveContains("crumb")
+        }
+        return false
     }
 
     private func withCrumb(_ queryItems: [URLQueryItem], crumb: String?) -> [URLQueryItem] {
@@ -3728,6 +3766,27 @@ public actor YFinanceClient {
                     }
                 }
             }
+        }
+
+        guard !ranges.isEmpty else {
+            return (bars, events, false)
+        }
+
+        let volumeValidatedRanges = YFRepairVolumeValidation.filterRanges(
+            ranges.map { YFRepairVolumeValidation.CandidateRange(start: $0.start, end: $0.end) },
+            volumes: descBars.map(\.volume),
+            signalUp: fUp,
+            signalDown: fDown,
+            splitMax: splitMax,
+            isInterday: isInterday,
+            interval: interval.rawValue,
+            kind: correctVolume ? .stockSplit : .unitSwitch
+        )
+        let acceptedVolumeRanges = Set(volumeValidatedRanges)
+        ranges = ranges.filter {
+            acceptedVolumeRanges.contains(
+                YFRepairVolumeValidation.CandidateRange(start: $0.start, end: $0.end)
+            )
         }
 
         guard !ranges.isEmpty else {
