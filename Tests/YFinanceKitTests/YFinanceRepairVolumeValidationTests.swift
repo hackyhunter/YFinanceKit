@@ -9,7 +9,7 @@ final class YFinanceRepairVolumeValidationTests: XCTestCase {
         volumes[6] = 1_500
         volumes[7] = 1_500
 
-        var up = Array(repeating: false, count: volumes.count)
+        let up = Array(repeating: false, count: volumes.count)
         var down = Array(repeating: false, count: volumes.count)
         down[5] = true
         let range = YFRepairVolumeValidation.CandidateRange(start: 5, end: 8)
@@ -30,7 +30,7 @@ final class YFinanceRepairVolumeValidationTests: XCTestCase {
 
     func testZeroVolumeDoesNotCountAsEvidenceAgainstSplitRepair() {
         let volumes: [Int?] = [nil, 0, 0, nil, 0, 0, nil, 0]
-        var up = Array(repeating: false, count: volumes.count)
+        let up = Array(repeating: false, count: volumes.count)
         var down = Array(repeating: false, count: volumes.count)
         down[2] = true
         let range = YFRepairVolumeValidation.CandidateRange(start: 2, end: 4)
@@ -51,7 +51,7 @@ final class YFinanceRepairVolumeValidationTests: XCTestCase {
 
     func testUnitSwitchAcceptsNormalVolumeAndRejectsSplitLikeVolume() {
         let range = YFRepairVolumeValidation.CandidateRange(start: 5, end: 8)
-        var up = Array(repeating: false, count: 20)
+        let up = Array(repeating: false, count: 20)
         var down = Array(repeating: false, count: 20)
         down[5] = true
 
