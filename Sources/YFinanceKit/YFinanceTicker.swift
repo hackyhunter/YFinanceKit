@@ -222,10 +222,11 @@ public struct YFTicker: Sendable, CustomStringConvertible {
         return series.historyTable(includeActions: actions, ignoreTZ: ignoreTZ)
     }
 
-    public func historyMetadata() async throws -> YFJSONValue {
-        // Python yfinance requests intraday history so Yahoo returns tradingPeriods in metadata.
-        let raw = try await client.historyRaw(symbol: symbol, range: .fiveDays, interval: .oneHour, includePrePost: true)
-        return raw["chart"]?["result"]?[0]?["meta"] ?? .object([:])
+    public func historyMetadata(includeTradingPeriods: Bool = false) async throws -> YFJSONValue {
+        try await client.robustHistoryMetadata(
+            symbol: symbol,
+            includeTradingPeriods: includeTradingPeriods
+        ).metadata
     }
 
     public func tickerTimeZone() async throws -> String? {

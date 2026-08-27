@@ -15,17 +15,17 @@ public typealias ETFQuery = YFScreenerQuery
 public typealias Auth = YFAuth
 
 /// Python-yfinance compatibility version targeted by this Swift port.
-public let __version__ = "1.6.0"
+public let __version__ = "1.7.0"
 public let __author__ = "Ran Aroussi"
 public let version = __version__
 
 public enum YFinanceKitBuildInfo {
     /// Swift package implementation version. Kept separate from Python yfinance
     /// compatibility so consumers can reason about both independently.
-    public static let packageVersion = "0.2.0-dev.3"
-    public static let upstreamVersion = "1.6.0"
-    public static let upstreamCommit = "0af231f6a47eee5e773290830d228de0c20d5ee1"
-    public static let upstreamDate = "2026-08-13"
+    public static let packageVersion = "0.2.0-dev.4"
+    public static let upstreamVersion = "1.7.0"
+    public static let upstreamCommit = "3d9d2f0cacb662bff689874cd6113bae3a30a885"
+    public static let upstreamDate = "2026-08-26"
     public static let implementation = "Swift"
 }
 

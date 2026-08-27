@@ -4,13 +4,13 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 
 ## Current baseline
 
-- Swift package implementation: **0.2.0-dev.1**
-- Upstream compatibility target: **yfinance 1.6.0**
-- Upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
-- Upstream date: **2026-08-13**
+- Swift package implementation: **0.2.0-dev.4**
+- Upstream compatibility target: **yfinance 1.7.0**
+- Upstream commit: `3d9d2f0cacb662bff689874cd6113bae3a30a885`
+- Upstream date: **2026-08-26**
 - Review date: **2026-08-26**
 
-## Ported from the 1.3-1.6 cycle
+## Ported through the 1.7 cycle
 
 - Yahoo cookie/crumb session handling for query1/query2 traffic, including basic and CSRF/consent strategies.
 - No independently persisted crumb reuse across unrelated cookie sessions.
@@ -23,12 +23,11 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Structured failure classification for rate limits, authorization failures, server failures, transport failures, malformed data, and Yahoo API errors.
 - Price-repair architecture covering reconstruction, 100x unit anomalies, unit switches, bad splits, corporate-action adjustment repair, OHLC normalization, finer-interval reconstruction, and repair-depth limiting.
 - Read-only history-integrity diagnostics for malformed OHLC, duplicate/non-monotonic timestamps, negative volume, non-finite values, and classic 100x unit jumps that survive processing.
-- Resilient history metadata: try intraday enrichment for `tradingPeriods`, then fall back to daily metadata for otherwise-valid tickers.
+- History metadata follows yfinance 1.7 / PR #2922: fetch `5d`/`1d` core metadata first and only request `5d`/`1h` with pre/post data when `tradingPeriods` are explicitly requested; failed optional enrichment preserves the valid daily metadata.
 
-## Selected post-1.6 dev fixes
+## yfinance 1.7.0 release deltas
 
-These fixes are deliberately ported without advancing the compatibility baseline beyond yfinance 1.6.0.
-
+- PR #2922 history-metadata lazy loading: core metadata comes from daily chart data; Swift exposes async `includeTradingPeriods` opt-in because network I/O cannot safely hide behind a synchronous JSON subscript.
 - PR #2953 cookie/crumb resilience: query1/query2 requests that declare `requiresCrumb: false` opportunistically use the shared Yahoo crumb, but transient bootstrap failures, crumb rate limits, or an unavailable crumb can degrade to a crumb-less target request. A real target 429 remains terminal, preserves `Retry-After`, and does not trigger session refresh. Python's per-request proxy preservation fix is not applicable to the injected `URLSession` transport.
 - PR #2958 plus follow-up `5c1f64e`: stock-split and unit-switch repair validate candidate ranges using aggregate denoised volume rather than one boundary pair, count only positive volume toward the sample budget, expand into neighboring ranges/gaps for short candidates, use the relaxed `0.2` volume-unit-change threshold coefficient, and treat missing usable local volume as insufficient evidence rather than a veto.
 
@@ -82,7 +81,7 @@ These fixes are deliberately ported without advancing the compatibility baseline
 ## Known remaining gaps / deliberate follow-ups
 
 - The #2927 protection currently lives at the resilient/safety layer. Moving the bounded-block invariant directly into the private legacy repair function still requires a locally compiled surgical core patch.
-- Python yfinance 1.6 rewrites some Yahoo error text when a user asks for 30m data but the internal fetch uses 15m. Swift still surfaces the Yahoo description from the internal request without that user-facing annotation.
+- Python yfinance 1.7 rewrites some Yahoo error text when a user asks for 30m data but the internal fetch uses 15m. Swift still surfaces the Yahoo description from the internal request without that user-facing annotation.
 - Full strict-concurrency and SwiftPM/Xcode verification should still be run before tagging a stable YFinanceKit release or advancing `nommminal`.
 
 ## Upstream watch
