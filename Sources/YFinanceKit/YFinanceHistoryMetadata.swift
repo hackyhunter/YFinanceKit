@@ -7,6 +7,9 @@ struct YFStoredHistoryMetadata: Sendable {
 
 public struct YFHistoryMetadataResult: Sendable {
     public let metadata: YFJSONValue
+    /// Interval used for the core metadata source. Since yfinance 1.7.0 parity,
+    /// this is normally `.oneDay`; optional trading-period enrichment may make
+    /// an additional 1h request without replacing the core metadata.
     public let intervalUsed: YFinanceClient.Interval
     public let hasTradingPeriods: Bool
 
@@ -206,42 +209,13 @@ private func yfMetadataHasTradingPeriods(_ metadata: YFJSONValue) -> Bool {
     }
 }
 
-extension YFinanceClient {
-    /// Internal compatibility hook for the existing ticker metadata accessor.
-    /// The exact four-argument overload is visible only inside YFinanceKit, so
-    /// external callers keep the original public raw-history behavior.
-    func historyRaw(
-        symbol: String,
-        range: Range,
-        interval: Interval,
-        includePrePost: Bool
-    ) async throws -> YFJSONValue {
-        if range == .fiveDays, interval == .oneHour, includePrePost {
-            let metadata = try await robustHistoryMetadata(symbol: symbol).metadata
-            return .object([
-                "chart": .object([
-                    "result": .array([.object(["meta": metadata])]),
-                    "error": .null,
-                ]),
-            ])
-        }
-
-        return try await historyRaw(
-            symbol: symbol,
-            range: range,
-            interval: interval,
-            includePrePost: includePrePost,
-            events: [.dividends, .splits],
-            timeout: nil
-        )
-    }
-}
-
 public extension YFinanceClient {
     /// Returns core history metadata without paying for intraday enrichment.
     /// A recent typed chart/history response for this symbol is reused when
-    /// available, so `history()` followed by metadata access needs no chart
-    /// request solely for metadata.
+    /// available; otherwise core metadata comes from a `5d/1d` chart request.
+    ///
+    /// This mirrors yfinance 1.7.0 / PR #2922. Swift callers explicitly opt into
+    /// the asynchronous `tradingPeriods` enrichment request.
     func robustHistoryMetadata(
         symbol: String,
         timeout: TimeInterval? = 10
@@ -269,7 +243,7 @@ public extension YFinanceClient {
         }
 
         if let cached = YFDecodedHistoryMetadataStore.shared.lookup(symbol) {
-            return await historyMetadataResult(
+            return try await historyMetadataResult(
                 symbol: symbol,
                 base: cached,
                 includeTradingPeriods: includeTradingPeriods,
@@ -281,7 +255,7 @@ public extension YFinanceClient {
             symbol: symbol,
             range: .fiveDays,
             interval: .oneDay,
-            includePrePost: true,
+            includePrePost: false,
             events: [],
             timeout: timeout
         )
@@ -304,7 +278,7 @@ public extension YFinanceClient {
             symbol: symbol
         )
 
-        return await historyMetadataResult(
+        return try await historyMetadataResult(
             symbol: symbol,
             base: base,
             includeTradingPeriods: includeTradingPeriods,
@@ -317,7 +291,7 @@ public extension YFinanceClient {
         base: YFStoredHistoryMetadata,
         includeTradingPeriods: Bool,
         timeout: TimeInterval?
-    ) async -> YFHistoryMetadataResult {
+    ) async throws -> YFHistoryMetadataResult {
         let baseHasTradingPeriods = yfMetadataHasTradingPeriods(base.metadata)
         if !includeTradingPeriods || baseHasTradingPeriods {
             return YFHistoryMetadataResult(
@@ -359,7 +333,7 @@ public extension YFinanceClient {
 
             let enriched = YFDecodedHistoryMetadataStore.shared.record(
                 metadata: enrichedMetadata,
-                intervalUsed: .oneHour,
+                intervalUsed: base.intervalUsed,
                 symbol: symbol
             )
             return YFHistoryMetadataResult(
@@ -368,6 +342,9 @@ public extension YFinanceClient {
                 hasTradingPeriods: true
             )
         } catch {
+            // Optional enrichment must not invalidate valid core metadata, but
+            // structured task cancellation must still escape.
+            try Task.checkCancellation()
             return YFHistoryMetadataResult(
                 metadata: base.metadata,
                 intervalUsed: base.intervalUsed,

@@ -855,8 +855,21 @@ public actor YFResilientClient {
         symbol: String,
         timeout: TimeInterval? = 10
     ) async throws -> YFHistoryMetadataResult {
+        try await historyMetadata(
+            symbol: symbol,
+            includeTradingPeriods: false,
+            timeout: timeout
+        )
+    }
+
+    public func historyMetadata(
+        symbol: String,
+        includeTradingPeriods: Bool,
+        timeout: TimeInterval? = 10
+    ) async throws -> YFHistoryMetadataResult {
         let symbol = Self.cleanSymbol(symbol)
-        if let existing = metadataFlights[symbol] {
+        let flightKey = "\(symbol)|\(includeTradingPeriods ? "trading-periods" : "core")"
+        if let existing = metadataFlights[flightKey] {
             await coordinator.noteCoalescedRequest()
             return try await existing.value
         }
@@ -864,12 +877,16 @@ public actor YFResilientClient {
         let client = self.client
         let coordinator = self.coordinator
         let task = Task<YFHistoryMetadataResult, Error> {
-            try await coordinator.execute(endpoint: "history-metadata", resource: symbol) {
-                try await client.robustHistoryMetadata(symbol: symbol, timeout: timeout)
+            try await coordinator.execute(endpoint: "history-metadata", resource: flightKey) {
+                try await client.robustHistoryMetadata(
+                    symbol: symbol,
+                    includeTradingPeriods: includeTradingPeriods,
+                    timeout: timeout
+                )
             }
         }
-        metadataFlights[symbol] = task
-        defer { metadataFlights[symbol] = nil }
+        metadataFlights[flightKey] = task
+        defer { metadataFlights[flightKey] = nil }
         return try await task.value
     }
 

@@ -5,8 +5,8 @@ YFinanceKit is a native Swift Yahoo Finance implementation that tracks Python yf
 ## Identity
 
 - Swift implementation version: `0.2.0-dev.4`
-- yfinance compatibility target: `1.6.0`
-- upstream baseline: `0af231f6a47eee5e773290830d228de0c20d5ee1` (2026-08-13)
+- yfinance compatibility target: `1.7.0`
+- upstream baseline: `3d9d2f0cacb662bff689874cd6113bae3a30a885` (2026-08-26)
 
 The Swift package version and the upstream compatibility version are intentionally independent.
 

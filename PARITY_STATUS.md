@@ -43,7 +43,7 @@
 - Python-style config aliases: `set_config`, `set_tz_cache_location`, `enable_debug_mode`
 - Python-style snake_case method aliases for `Ticker`/`Tickers` are included for migration ergonomics (including table-oriented `get_history_table`/`get_download_table` and top-level `download_table`)
 - Python property-name callability wrappers on `Ticker` are available (`major_holders`, `fast_info`, `earnings_dates`, `history_metadata`, etc.)
-- `Ticker.historyMetadata()` now requests `5d`/`1h` so Yahoo includes `tradingPeriods` in the returned metadata (Python-like)
+- yfinance 1.7 metadata behavior is mirrored explicitly: `Ticker.historyMetadata()` uses `5d`/`1d` core metadata by default, while `includeTradingPeriods: true` performs the additional `5d`/`1h` enrichment request only when needed
 - `Search` includes Python-style constructor labels (`max_results`, `include_cb`, `enable_fuzzy_query`, `recommended`, `raise_errors`) and raw-response accessors (`response`, `get_response`)
 - `Search`/`Lookup` now honor `timeout` (URLRequest timeout) and `raise_errors`/`raiseErrors` (suppresses errors and returns empty results when `false`)
 - `Lookup`/`Market`/`Sector`/`Industry`/`Calendars` now expose additional snake_case aliases for Python migration ergonomics

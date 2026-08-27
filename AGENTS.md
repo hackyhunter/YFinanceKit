@@ -4,9 +4,9 @@
 
 `YFinanceKit` is the canonical Swift implementation of Yahoo Finance behavior for `nommminal` and other Swift consumers. Python `ranaroussi/yfinance` is an upstream behavioral oracle, not a source tree to mechanically translate.
 
-The compatibility target is yfinance **1.6.0** at upstream commit:
+The compatibility target is yfinance **1.7.0** at upstream commit:
 
-`0af231f6a47eee5e773290830d228de0c20d5ee1`
+`3d9d2f0cacb662bff689874cd6113bae3a30a885`
 
 Keep the Swift package version separate from the upstream compatibility version. See `YFinanceKitBuildInfo`.
 

@@ -7,13 +7,13 @@ Native Swift implementation of Yahoo Finance behavior for iOS/macOS, designed as
 YFinanceKit tracks two versions independently:
 
 - Swift package implementation: `0.2.0-dev.4`
-- upstream yfinance compatibility target: `1.6.0`
-- audited upstream commit: `0af231f6a47eee5e773290830d228de0c20d5ee1`
-- audited upstream date: `2026-08-13`
+- upstream yfinance compatibility target: `1.7.0`
+- audited upstream commit: `3d9d2f0cacb662bff689874cd6113bae3a30a885`
+- audited upstream date: `2026-08-26`
 
 These are exposed through `YFinanceKitBuildInfo` plus compatibility constants such as `__version__`.
 
-The current `0.2.0-dev.4` snapshot includes the verified resilience core, lazy history metadata, checked provider-number handling, and core unit-switch repair regressions. Its offline, strict-concurrency, bounded-live, and exact app-integration gates have passed; it remains a development build until the remaining manual app/release checks justify a stable tag.
+The current `0.2.0-dev.4` snapshot includes the verified resilience core, yfinance 1.7 lazy history metadata, checked provider-number handling, and core unit-switch repair regressions. Its offline, strict-concurrency, and exact app-integration gates must pass for this merged candidate; it remains a development build until the remaining manual app/release checks justify a stable tag.
 
 ## What is implemented
 
