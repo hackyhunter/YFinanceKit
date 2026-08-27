@@ -869,7 +869,7 @@ final class YFinanceKitTests: XCTestCase {
         XCTAssertEqual(String(describing: tickers), "yfinance.Tickers object <AAPL,MSFT>")
         XCTAssertEqual(String(describing: sector), "yfinance.Sector object <technology>")
         XCTAssertEqual(String(describing: industry), "yfinance.Industry object <software>")
-        XCTAssertEqual(__version__, "1.6.0")
+        XCTAssertEqual(__version__, "1.7.0")
         XCTAssertEqual(__author__, "Ran Aroussi")
         XCTAssertEqual(YFinanceKit.version, __version__)
     }
