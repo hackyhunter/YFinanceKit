@@ -3,6 +3,40 @@ import XCTest
 @testable import YFinanceKit
 
 final class YFinanceKitTests: XCTestCase {
+    func testCalendarFlatteningPreservesEarningsDateAndTimingColumns() {
+        let raw: YFJSONValue = .object([
+            "finance": .object([
+                "result": .array([
+                    .object([
+                        "documents": .array([
+                            .object([
+                                "columns": .array([
+                                    .object(["label": .string("Symbol"), "type": .string("STRING")]),
+                                    .object(["label": .string("Event Start Date"), "type": .string("DATE")]),
+                                    .object(["label": .string("Event Start Date"), "type": .string("STRING")]),
+                                ]),
+                                "rows": .array([
+                                    .array([
+                                        .string("AVGO"),
+                                        .string("2026-09-03T20:00:00.000Z"),
+                                        .string("AMC"),
+                                    ]),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ])
+
+        let flattened = YFCalendars.flattenVisualization(raw)
+        let row = flattened.arrayValue?.first?.objectValue
+
+        XCTAssertEqual(row?["Symbol"]?.stringValue, "AVGO")
+        XCTAssertEqual(row?["Event Start Date"]?.stringValue, "2026-09-03T20:00:00.000Z")
+        XCTAssertEqual(row?["Timing"]?.stringValue, "AMC")
+    }
+
     func testSearchDecodeDefaultsMissingCollectionsToEmpty() throws {
         let json = """
         {

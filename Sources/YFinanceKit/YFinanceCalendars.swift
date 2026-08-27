@@ -421,7 +421,7 @@ public actor YFCalendars {
         return table
     }
 
-    private static func flattenVisualization(_ raw: YFJSONValue) -> YFJSONValue {
+    static func flattenVisualization(_ raw: YFJSONValue) -> YFJSONValue {
         guard
             let document = raw["finance"]?["result"]?[0]?["documents"]?[0],
             let columnItems = document["columns"]?.arrayValue,
@@ -430,7 +430,14 @@ public actor YFCalendars {
             return raw
         }
 
-        let labels = columnItems.map { $0["label"]?.stringValue ?? "" }
+        let labels = columnItems.map { column -> String in
+            let label = column["label"]?.stringValue ?? ""
+            let type = column["type"]?.stringValue?.uppercased() ?? ""
+            if label == "Event Start Date", type == "STRING" {
+                return "Timing"
+            }
+            return label
+        }
         let flattened: [YFJSONValue] = rows.map { row in
             guard let rowValues = row.arrayValue else {
                 return row
