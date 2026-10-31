@@ -10,6 +10,16 @@ public struct YFNetworkConfig: Sendable {
     }
 }
 
+public struct YFLocaleConfig: Sendable {
+    public var lang: String
+    public var region: String
+
+    public init(lang: String = "en-US", region: String = "US") {
+        self.lang = lang
+        self.region = region
+    }
+}
+
 public struct YFDebugConfig: Sendable {
     public var enabled: Bool
     public var hideExceptions: Bool
@@ -25,6 +35,7 @@ public actor YFConfigStore {
 
     public var network = YFNetworkConfig()
     public var debug = YFDebugConfig()
+    public var locale = YFLocaleConfig()
     public var cacheDirectory: String?
 
     public func setConfig(proxy: String? = nil, retries: Int? = nil) {
@@ -39,6 +50,17 @@ public actor YFConfigStore {
     public func enableDebugMode(_ enabled: Bool = true) {
         debug.enabled = enabled
         debug.hideExceptions = !enabled
+    }
+
+    public func setLocale(lang: String, region: String) {
+        let cleanedLang = lang.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedRegion = region.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanedLang.isEmpty {
+            locale.lang = cleanedLang
+        }
+        if !cleanedRegion.isEmpty {
+            locale.region = cleanedRegion.uppercased()
+        }
     }
 
     public func setTZCacheLocation(_ path: String) {

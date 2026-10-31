@@ -8,7 +8,7 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - Upstream compatibility target: **yfinance 1.7.0**
 - Upstream commit: `3d9d2f0cacb662bff689874cd6113bae3a30a885`
 - Upstream date: **2026-08-26**
-- Review date: **2026-08-26**
+- Review date: **2026-10-30**
 
 ## Ported through the 1.7 cycle
 
@@ -30,6 +30,11 @@ YFinanceKit is a native Swift implementation that tracks Python `ranaroussi/yfin
 - PR #2922 history-metadata lazy loading: core metadata comes from daily chart data; Swift exposes async `includeTradingPeriods` opt-in because network I/O cannot safely hide behind a synchronous JSON subscript.
 - PR #2953 cookie/crumb resilience: query1/query2 requests that declare `requiresCrumb: false` opportunistically use the shared Yahoo crumb, but transient bootstrap failures, crumb rate limits, or an unavailable crumb can degrade to a crumb-less target request. A real target 429 remains terminal, preserves `Retry-After`, and does not trigger session refresh. Python's per-request proxy preservation fix is not applicable to the injected `URLSession` transport.
 - PR #2958 plus follow-up `5c1f64e`: stock-split and unit-switch repair validate candidate ranges using aggregate denoised volume rather than one boundary pair, count only positive volume toward the sample budget, expand into neighboring ranges/gaps for short candidates, use the relaxed `0.2` volume-unit-change threshold coefficient, and treat missing usable local volume as insufficient evidence rather than a veto.
+
+## Selected post-1.7 upstream fixes
+
+- PR #3027 GraphQL ticker news: Yahoo retired `/xhr/ncp`; Swift now uses Yahoo Finance's Nexus GraphQL list endpoint with the required `x-yahoo-cg-client-name: finance` header, locale-aware list slugs, bounded cursor pagination, AssetError filtering, and normalization back into the existing `data.tickerStream.stream` envelope so callers remain source-compatible.
+- PR #3029 lookup cache recovery: malformed or transient lookup responses returned under best-effort error suppression are no longer cached as valid empty results. A later request can recover, while genuinely valid empty Yahoo responses remain cacheable.
 
 ## Swift hardening beyond direct parity
 
