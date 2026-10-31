@@ -52,9 +52,9 @@ public actor YFLookup {
                 throw error
             }
             await logSuppressedError(error, context: "Lookup.fetch(type:\(type.rawValue))")
-            let empty = YFJSONValue.object([:])
-            cache[cacheKey] = empty
-            return empty
+            // A malformed/transient response is not a valid empty lookup result.
+            // Do not poison the cache: the next call must be allowed to reach Yahoo.
+            return YFJSONValue.object([:])
         }
     }
 
