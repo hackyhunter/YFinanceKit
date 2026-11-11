@@ -52,6 +52,20 @@ extension YFinanceClient {
             throw YFinanceError.invalidRequest("News locale cannot be empty")
         }
 
+        try Task.checkCancellation()
+        let cacheKey = YFNewsResponseCache.Key(
+            symbol: symbol,
+            count: requestedCount,
+            tab: listName,
+            lang: effectiveLang,
+            region: effectiveRegion
+        )
+        if let cached = await YFNewsResponseCache.shared.value(for: cacheKey, owner: self) {
+            try Task.checkCancellation()
+            return cached
+        }
+        var cacheable = true
+
         let slug = "list=finance-\(effectiveRegion)-\(effectiveLang)-ticker-\(listName)"
         let baseVariables: [String: YFJSONValue] = [
             "clientContext": .object([
@@ -118,6 +132,7 @@ extension YFinanceClient {
                 headers: ["x-yahoo-cg-client-name": "finance"]
             )
 
+            cacheable = cacheable && YFNewsResponseCache.isSuccessfulPage(response)
             let stream = response["data"]?["lightyearList"]?["main"]
             let edges = stream?["edges"]?.arrayValue ?? []
 
@@ -135,12 +150,23 @@ extension YFinanceClient {
             after = pageInfo?["endCursor"]?.stringValue
             let hasNextPage = pageInfo?["hasNextPage"]?.boolValue ?? false
 
+            // Preserve the existing partial-result behavior, but do not retain
+            // a failed or stalled pagination result as a successful cache hit.
+            if hasNextPage, news.count < requestedCount,
+               edges.isEmpty || after == nil || after == previousAfter || pagesFetched >= maxPages {
+                cacheable = false
+            }
             if edges.isEmpty || !hasNextPage || after == nil || after == previousAfter {
                 break
             }
         }
 
-        return Self.newsEnvelope(Array(news.prefix(requestedCount)))
+        let result = Self.newsEnvelope(Array(news.prefix(requestedCount)))
+        try Task.checkCancellation()
+        if cacheable {
+            await YFNewsResponseCache.shared.insert(result, for: cacheKey, owner: self)
+        }
+        return result
     }
 
     private static func newsEnvelope(_ articles: [YFJSONValue]) -> YFJSONValue {
