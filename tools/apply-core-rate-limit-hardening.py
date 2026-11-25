@@ -35,8 +35,19 @@ def patch_client() -> bool:
     changed = False
 
     old_recovery = """        } catch {\n            guard shouldUseCrumb else {\n                throw error\n            }\n\n            await crumbStore.invalidate()\n            let refreshedCrumb = try await crumbStore.currentCrumb(forceRefresh: true)\n            return try await executeRequest(\n                baseURL: baseURL,\n                path: path,\n                queryItems: withCrumb(queryItems, crumb: refreshedCrumb),\n                method: method,\n                body: body,\n                headers: headers,\n                timeout: effectiveTimeout\n            )\n        }\n"""
-    new_recovery = """        } catch {\n            // A target-endpoint 429 is provider backpressure, not evidence that\n            // the Yahoo cookie/crumb strategy is invalid. Do not generate a\n            // second request by switching/refreshing the session.\n            if YFinanceErrorClassifier.kind(of: error) == .rateLimited {\n                throw error\n            }\n\n            guard shouldUseCrumb else {\n                throw error\n            }\n\n            await crumbStore.invalidate()\n            let refreshedCrumb = try await crumbStore.currentCrumb(forceRefresh: true)\n            return try await executeRequest(\n                baseURL: baseURL,\n                path: path,\n                queryItems: withCrumb(queryItems, crumb: refreshedCrumb),\n                method: method,\n                body: body,\n                headers: headers,\n                timeout: effectiveTimeout\n            )\n        }\n"""
-    changed |= replace_exact(CLIENT, old_recovery, new_recovery)
+    rate_limit_bypass = """        } catch {
+            // A target-endpoint 429 is provider backpressure, not evidence that
+            // the Yahoo cookie/crumb strategy is invalid. Do not generate a
+            // second request by switching/refreshing the session.
+            if YFinanceErrorClassifier.kind(of: error) == .rateLimited {
+                throw error
+            }
+"""
+    # Current versions keep this guard ahead of optional crumb recovery.
+    # Recognize the guard in both versions without rewriting the recovery body.
+    if rate_limit_bypass not in CLIENT.read_text(encoding="utf-8"):
+        new_recovery = old_recovery.replace("        } catch {\n", rate_limit_bypass + "\n", 1)
+        changed |= replace_exact(CLIENT, old_recovery, new_recovery)
 
     client_text = CLIENT.read_text(encoding="utf-8")
     retry_after_already_extracted = (

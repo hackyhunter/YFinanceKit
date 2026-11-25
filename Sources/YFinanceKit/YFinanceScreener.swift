@@ -93,8 +93,18 @@ public struct YFScreener: Sendable {
         if let quoteType = request.quoteType {
             try request.query.validate(for: quoteType)
         }
-        let raw = try await client.screener(body: request.toJSONValue())
+        let raw = try await client.screener(body: Self.postBody(for: request))
         return raw["finance"]?["result"]?[0] ?? .object([:])
+    }
+
+    // The saved/predefined GET API uses count; the regular POST API uses size.
+    // Keep the public request model's serialization unchanged for compatibility,
+    // and translate at the HTTP boundary for both paginated and custom screens.
+    static func postBody(for request: YFScreenerRequest) -> YFJSONValue {
+        var body = request.toJSONValue().objectValue ?? [:]
+        body["size"] = .number(Double(request.size ?? request.count))
+        body.removeValue(forKey: "count")
+        return .object(body)
     }
 
     public func run(

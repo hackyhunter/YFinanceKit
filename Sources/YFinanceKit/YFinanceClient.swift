@@ -680,34 +680,22 @@ public actor YFinanceClient {
     public func tickerNews(
         symbol: String,
         count: Int = 10,
-        tab: String = "news"
+        tab: String = "news",
+        lang: String? = nil,
+        region: String? = nil
     ) async throws -> YFJSONValue {
-        let queryRefMap: [String: String] = [
-            "all": "newsAll",
-            "news": "latestNews",
-            "press releases": "pressRelease",
-        ]
+        let configuredLocale = await YFConfigStore.shared.locale
+        let requestedLang = lang?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedRegion = region?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveLang = requestedLang.flatMap { $0.isEmpty ? nil : $0 } ?? configuredLocale.lang
+        let effectiveRegion = requestedRegion.flatMap { $0.isEmpty ? nil : $0 } ?? configuredLocale.region
 
-        guard let queryRef = queryRefMap[tab.lowercased()] else {
-            throw YFinanceError.invalidRequest("Invalid tab: \(tab)")
-        }
-
-        let payload = YFJSONValue.object([
-            "serviceConfig": .object([
-                "snippetCount": .number(Double(max(count, 0))),
-                "s": .array([.string(normalizedSymbol(symbol))]),
-            ]),
-        ])
-
-        return try await rawPost(
-            host: .root,
-            path: "/xhr/ncp",
-            queryItems: [
-                URLQueryItem(name: "queryRef", value: queryRef),
-                URLQueryItem(name: "serviceKey", value: "ncp_fin"),
-            ],
-            body: payload,
-            requiresCrumb: false
+        return try await tickerNewsGraphQL(
+            symbol: normalizedSymbol(symbol),
+            count: count,
+            tab: tab,
+            lang: effectiveLang,
+            region: effectiveRegion
         )
     }
 
@@ -768,6 +756,23 @@ public actor YFinanceClient {
             body: encodedBody,
             headers: headers,
             requiresCrumb: requiresCrumb,
+            timeout: timeout
+        )
+        return try YFJSONValue.decode(data: data)
+    }
+
+    public func rawPost(
+        url: URL,
+        body: YFJSONValue? = nil,
+        headers: [String: String] = [:],
+        timeout: TimeInterval? = nil
+    ) async throws -> YFJSONValue {
+        let encodedBody = try body.map { try YFJSONValue.encode($0) }
+        let data = try await requestData(
+            url: url,
+            method: "POST",
+            body: encodedBody,
+            headers: headers,
             timeout: timeout
         )
         return try YFJSONValue.decode(data: data)
