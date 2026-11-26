@@ -569,6 +569,72 @@ public actor YFStaleCache<Key: Hashable & Sendable, Value: Sendable> {
     public var count: Int { entries.count }
 }
 
+/// Share one provider operation per key. Cancellation ends one caller's wait
+/// immediately and stops provider work once the last caller leaves.
+actor YFCoalescedRequests<Value: Sendable> {
+    private struct Flight {
+        let id: UUID
+        let task: Task<Void, Never>
+        var waiters: [UUID: CheckedContinuation<Value, Error>]
+    }
+
+    private var flights: [String: Flight] = [:]
+
+    func run(
+        key: String,
+        coordinator: YFRequestCoordinator,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        let waiterID = UUID()
+        let value: Value = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                if flights[key] != nil {
+                    flights[key]?.waiters[waiterID] = continuation
+                    Task { await coordinator.noteCoalescedRequest() }
+                    return
+                }
+
+                let flightID = UUID()
+                let task = Task {
+                    let result: Result<Value, Error>
+                    do {
+                        try Task.checkCancellation()
+                        result = .success(try await operation())
+                    } catch {
+                        result = .failure(error)
+                    }
+                    finish(key: key, flightID: flightID, result: result)
+                }
+                flights[key] = Flight(id: flightID, task: task, waiters: [waiterID: continuation])
+            }
+        } onCancel: {
+            Task { await self.cancel(key: key, waiterID: waiterID) }
+        }
+        try Task.checkCancellation()
+        return value
+    }
+
+    private func finish(key: String, flightID: UUID, result: Result<Value, Error>) {
+        guard flights[key]?.id == flightID,
+              let flight = flights.removeValue(forKey: key) else { return }
+        for waiter in flight.waiters.values {
+            waiter.resume(with: result)
+        }
+    }
+
+    private func cancel(key: String, waiterID: UUID) {
+        guard let waiter = flights[key]?.waiters.removeValue(forKey: waiterID) else { return }
+        if flights[key]?.waiters.isEmpty == true {
+            flights.removeValue(forKey: key)?.task.cancel()
+        }
+        waiter.resume(throwing: CancellationError())
+    }
+}
+
 /// A hardened façade for the highest-volume Yahoo operations. The underlying
 /// `YFinanceClient` remains available and unchanged, while this layer centralizes
 /// request budgeting, coalescing, cooldowns, retries and SWR caching.
@@ -580,11 +646,11 @@ public actor YFResilientClient {
     private let quoteCache = YFStaleCache<String, YFQuote?>(capacity: 512)
     private let historyCache = YFStaleCache<String, YFHistorySeries>(capacity: 128)
 
-    private var quoteFlights: [String: Task<YFQuote?, Error>] = [:]
-    private var historyFlights: [String: Task<YFHistorySeries, Error>] = [:]
-    private var metadataFlights: [String: Task<YFHistoryMetadataResult, Error>] = [:]
-    private var financialFlights: [String: Task<YFFinancialStatementSeries, Error>] = [:]
-    private var infoFlights: [String: Task<YFJSONValue, Error>] = [:]
+    private let quoteFlights = YFCoalescedRequests<YFQuote?>()
+    private let historyFlights = YFCoalescedRequests<YFHistorySeries>()
+    private let metadataFlights = YFCoalescedRequests<YFHistoryMetadataResult>()
+    private let financialFlights = YFCoalescedRequests<YFFinancialStatementSeries>()
+    private let infoFlights = YFCoalescedRequests<YFJSONValue>()
 
     public init(
         client: YFinanceClient = YFinanceClient(),
@@ -620,21 +686,13 @@ public actor YFResilientClient {
 
     public func quote(symbol: String) async throws -> YFQuote? {
         let symbol = Self.cleanSymbol(symbol)
-        if let existing = quoteFlights[symbol] {
-            await coordinator.noteCoalescedRequest()
-            return try await existing.value
-        }
-
         let client = self.client
         let coordinator = self.coordinator
-        let task = Task<YFQuote?, Error> {
+        return try await quoteFlights.run(key: symbol, coordinator: coordinator) {
             try await coordinator.execute(endpoint: "quote", resource: symbol) {
                 try await client.quote(symbol: symbol)
             }
         }
-        quoteFlights[symbol] = task
-        defer { quoteFlights[symbol] = nil }
-        return try await task.value
     }
 
     public func quoteCached(
@@ -689,14 +747,9 @@ public actor YFResilientClient {
             rounding: rounding
         )
 
-        if let existing = historyFlights[key] {
-            await coordinator.noteCoalescedRequest()
-            return try await existing.value
-        }
-
         let client = self.client
         let coordinator = self.coordinator
-        let task = Task<YFHistorySeries, Error> {
+        return try await historyFlights.run(key: key, coordinator: coordinator) {
             try await coordinator.execute(endpoint: "history", resource: "\(symbol):\(range.rawValue):\(interval.rawValue)") {
                 try await client.history(
                     symbol: symbol,
@@ -713,9 +766,6 @@ public actor YFResilientClient {
                 )
             }
         }
-        historyFlights[key] = task
-        defer { historyFlights[key] = nil }
-        return try await task.value
     }
 
     public func history(
@@ -746,14 +796,9 @@ public actor YFResilientClient {
             rounding: rounding
         )
 
-        if let existing = historyFlights[key] {
-            await coordinator.noteCoalescedRequest()
-            return try await existing.value
-        }
-
         let client = self.client
         let coordinator = self.coordinator
-        let task = Task<YFHistorySeries, Error> {
+        return try await historyFlights.run(key: key, coordinator: coordinator) {
             let series = try await coordinator.execute(endpoint: "history", resource: "\(symbol):custom:\(interval.rawValue)") {
                 try await client.history(
                     symbol: symbol,
@@ -772,9 +817,6 @@ public actor YFResilientClient {
             }
             return series.trimmingEvents(to: start..<end)
         }
-        historyFlights[key] = task
-        defer { historyFlights[key] = nil }
-        return try await task.value
     }
 
     public func historyCached(
@@ -869,14 +911,9 @@ public actor YFResilientClient {
     ) async throws -> YFHistoryMetadataResult {
         let symbol = Self.cleanSymbol(symbol)
         let flightKey = "\(symbol)|\(includeTradingPeriods ? "trading-periods" : "core")"
-        if let existing = metadataFlights[flightKey] {
-            await coordinator.noteCoalescedRequest()
-            return try await existing.value
-        }
-
         let client = self.client
         let coordinator = self.coordinator
-        let task = Task<YFHistoryMetadataResult, Error> {
+        return try await metadataFlights.run(key: flightKey, coordinator: coordinator) {
             try await coordinator.execute(endpoint: "history-metadata", resource: flightKey) {
                 try await client.robustHistoryMetadata(
                     symbol: symbol,
@@ -885,9 +922,6 @@ public actor YFResilientClient {
                 )
             }
         }
-        metadataFlights[flightKey] = task
-        defer { metadataFlights[flightKey] = nil }
-        return try await task.value
     }
 
     public func financialStatement(
@@ -898,14 +932,9 @@ public actor YFResilientClient {
     ) async throws -> YFFinancialStatementSeries {
         let symbol = Self.cleanSymbol(symbol)
         let key = "\(symbol)|\(kind.rawValue)|\(String(describing: frequency))"
-        if let existing = financialFlights[key] {
-            await coordinator.noteCoalescedRequest()
-            return try await existing.value
-        }
-
         let client = self.client
         let coordinator = self.coordinator
-        let task = Task<YFFinancialStatementSeries, Error> {
+        return try await financialFlights.run(key: key, coordinator: coordinator) {
             try await coordinator.execute(endpoint: "financials", resource: "\(symbol):\(kind.rawValue)") {
                 try await client.financialStatement(
                     symbol: symbol,
@@ -915,28 +944,17 @@ public actor YFResilientClient {
                 )
             }
         }
-        financialFlights[key] = task
-        defer { financialFlights[key] = nil }
-        return try await task.value
     }
 
     public func info(symbol: String) async throws -> YFJSONValue {
         let symbol = Self.cleanSymbol(symbol)
-        if let existing = infoFlights[symbol] {
-            await coordinator.noteCoalescedRequest()
-            return try await existing.value
-        }
-
         let client = self.client
         let coordinator = self.coordinator
-        let task = Task<YFJSONValue, Error> {
+        return try await infoFlights.run(key: symbol, coordinator: coordinator) {
             try await coordinator.execute(endpoint: "info", resource: symbol) {
                 try await client.ticker(symbol).info()
             }
         }
-        infoFlights[symbol] = task
-        defer { infoFlights[symbol] = nil }
-        return try await task.value
     }
 
     public func diagnostics() async -> YFRequestDiagnosticsSnapshot {

@@ -66,6 +66,76 @@ final class YFinanceResilientClientTests: XCTestCase {
         XCTAssertEqual(diagnostics.cacheHits, 1)
     }
 
+    func testCancellingLastHistoryWaiterStopsTheProviderOperation() async {
+        let requests = YFCoalescedRequests<Int>()
+        let coordinator = YFRequestCoordinator()
+        let started = expectation(description: "provider operation started")
+        let stopped = expectation(description: "provider operation cancelled")
+        let (values, input) = AsyncStream<Int>.makeStream()
+        defer { input.finish() }
+
+        let request = Task {
+            try await requests.run(key: "AAPL:1d", coordinator: coordinator) {
+                started.fulfill()
+                for await value in values { return value }
+                stopped.fulfill()
+                throw CancellationError()
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        request.cancel()
+        await fulfillment(of: [stopped], timeout: 2)
+        input.finish()
+        if case .failure(let error) = await request.result {
+            XCTAssertTrue(error is CancellationError)
+        } else {
+            XCTFail("Cancelled waiter returned a result")
+        }
+    }
+
+    func testCancellingOneHistoryWaiterPreservesCoalescedWork() async throws {
+        let requests = YFCoalescedRequests<Int>()
+        let coordinator = YFRequestCoordinator()
+        let started = expectation(description: "provider operation started")
+        let firstReturned = expectation(description: "cancelled waiter returned")
+        let (values, input) = AsyncStream<Int>.makeStream()
+        defer { input.finish() }
+
+        let first = Task {
+            defer { firstReturned.fulfill() }
+            return try await requests.run(key: "AAPL:1d", coordinator: coordinator) {
+                started.fulfill()
+                for await value in values { return value }
+                throw CancellationError()
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let second = Task {
+            try await requests.run(key: "AAPL:1d", coordinator: coordinator) {
+                XCTFail("Expected the second caller to join the existing request")
+                return -1
+            }
+        }
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while await coordinator.snapshot().coalescedRequests == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let coalescedRequests = await coordinator.snapshot().coalescedRequests
+        XCTAssertEqual(coalescedRequests, 1)
+        first.cancel()
+        await fulfillment(of: [firstReturned], timeout: 2)
+        input.yield(27)
+        input.finish()
+        if case .failure(let error) = await first.result {
+            XCTAssertTrue(error is CancellationError)
+        } else {
+            XCTFail("Cancelled waiter returned a result")
+        }
+        let value = try await second.value
+        XCTAssertEqual(value, 27)
+    }
+
     func testGenericOperationUsesSharedCoordinatorAndDoesNotRetryRateLimit() async {
         let counter = TestURLProtocolCounterState()
         let resilient = YFResilientClient(

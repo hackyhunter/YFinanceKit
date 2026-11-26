@@ -813,6 +813,7 @@ public actor YFinanceClient {
         requiresCrumb: Bool,
         timeout: TimeInterval? = nil
     ) async throws -> Data {
+        try Task.checkCancellation()
         let baseURL = baseURL(for: host)
         let shouldUseCrumb: Bool
         let crumbIsOptional: Bool
@@ -860,6 +861,7 @@ public actor YFinanceClient {
             if YFinanceErrorClassifier.kind(of: error) == .rateLimited {
                 throw error
             }
+            try Task.checkCancellation()
 
             guard shouldUseCrumb else {
                 throw error
@@ -925,6 +927,7 @@ public actor YFinanceClient {
         var lastError: Error?
 
         while attempt <= retries {
+            try Task.checkCancellation()
             do {
                 let response = try await transport.send(request)
                 if debugEnabled {
@@ -937,6 +940,7 @@ public actor YFinanceClient {
                 )
                 return response.data
             } catch {
+                try Task.checkCancellation()
                 lastError = error
                 let mappedError = mapTransport(error)
                 if attempt < retries, shouldRetry(error: mappedError) {
@@ -984,6 +988,7 @@ public actor YFinanceClient {
         var lastError: Error?
 
         while attempt <= retries {
+            try Task.checkCancellation()
             do {
                 let response = try await transport.send(request)
                 if debugEnabled {
@@ -996,6 +1001,7 @@ public actor YFinanceClient {
                 )
                 return response.data
             } catch {
+                try Task.checkCancellation()
                 lastError = error
                 let mappedError = mapTransport(error)
                 if attempt < retries, shouldRetry(error: mappedError) {
